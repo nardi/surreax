@@ -40,6 +40,9 @@ src = ["src", "tests"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+# jaxtyping shape strings like `Float[Array, "n d"]` are not Python expressions,
+# so ruff misreads them as broken forward annotations.
+ignore = ["F722"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests", "docs"]
@@ -52,6 +55,10 @@ source = ["surreax"]
 [tool.coverage.report]
 fail_under = 100
 show_missing = true
+exclude_also = [
+    "^\\s*\\.\\.\\.\\s*$",
+    "if TYPE_CHECKING:",
+]
 
 [tool.ty.environment]
 python-version = "3.11"

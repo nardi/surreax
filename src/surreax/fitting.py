@@ -1,9 +1,15 @@
 """Closed-form fitting for forms that are linear in their parameters.
 
 The design matrix holds one feature vector per sample. The fit is one
-regularized least squares solve of the normal equations, shared across output
-coordinates because the right-hand side carries every output at once. There is
-no learning rate, no step count, and the answer is deterministic.
+regularized least squares solve, shared across output coordinates because the
+right-hand side carries every output at once. There is no learning rate, no
+step count, and the answer is deterministic.
+
+The solve goes through `lstsq` on the design matrix rather than the normal
+equations, so it keeps the condition number of the design matrix instead of
+squaring it. Regularization enters by stacking `sqrt(ridge)` times the identity
+below the design, the standard way to write a ridge fit as a plain least
+squares.
 """
 
 import equinox as eqx
@@ -34,7 +40,13 @@ def fit_linear(
     """Solve for the weights that best map `inputs` to `targets`."""
     design = jax.vmap(form.features)(inputs)
     feature_count = design.shape[1]
-    gram = design.T @ design + ridge * jnp.eye(feature_count, dtype=design.dtype)
-    rhs = design.T @ targets
-    weights = jnp.linalg.solve(gram, rhs).T
-    return LinearModel(weights=weights, form=form)
+    # Stacking sqrt(ridge) * I below the design turns the ridge fit into a
+    # plain least squares, which lstsq solves without forming the normal
+    # equations.
+    penalty = jnp.sqrt(ridge) * jnp.eye(feature_count, dtype=design.dtype)
+    stacked_design = jnp.concatenate([design, penalty])
+    stacked_targets = jnp.concatenate(
+        [targets, jnp.zeros((feature_count, targets.shape[1]), dtype=targets.dtype)]
+    )
+    weights, *_ = jnp.linalg.lstsq(stacked_design, stacked_targets, rcond=None)
+    return LinearModel(weights=weights.T, form=form)

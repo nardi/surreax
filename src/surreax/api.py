@@ -18,6 +18,7 @@ from surreax.domain import Domain
 from surreax.fitted import FittedSurrogate
 from surreax.fitting import fit_linear, fit_linear_sobolev
 from surreax.flatten import Unraveler, ravel, ravel_example
+from surreax.forms.max_affine import MaxAffineForm, fit_max_affine
 from surreax.forms.protocol import LinearForm
 from surreax.normalize import Normalizer
 from surreax.reduction import LinearReduction
@@ -65,6 +66,7 @@ def _error_report(
     target: Target,
     inputs: Float[Array, "n d"],
     unravel: Unraveler,
+    structure_cost: int,
 ) -> ErrorReport:
     """Measure value and derivative error against the target on held-out points.
 
@@ -101,13 +103,14 @@ def _error_report(
         derivative_max=jnp.max(jacobian_residual),
         projection_mean=jnp.mean(projection_residual),
         projection_max=jnp.max(projection_residual),
+        structure_cost=structure_cost,
     )
 
 
 def fit(
     target: Target,
     domain: Domain,
-    form: LinearForm,
+    form: LinearForm | MaxAffineForm,
     *,
     samples: int = 512,
     holdout: float = 0.2,
@@ -166,27 +169,34 @@ def fit(
     output_normalizer = normalize.from_moments(encoded_outputs)
     normalized_outputs = jax.vmap(output_normalizer.forward)(encoded_outputs)
 
-    if derivative_weight > 0.0:
-        transform = functools.partial(
-            _normalized_target,
-            target=target,
-            domain=domain,
-            input_reduction=input_reduction,
-            input_normalizer=input_normalizer,
-            output_reduction=output_reduction,
-            output_normalizer=output_normalizer,
-        )
-        target_jacobians = jax.vmap(jax.jacobian(transform))(normalized_inputs)
-        model = fit_linear_sobolev(
-            form,
-            normalized_inputs,
-            normalized_outputs,
-            target_jacobians,
-            ridge=ridge,
-            derivative_weight=derivative_weight,
-        )
+    if isinstance(form, LinearForm):
+        if derivative_weight > 0.0:
+            transform = functools.partial(
+                _normalized_target,
+                target=target,
+                domain=domain,
+                input_reduction=input_reduction,
+                input_normalizer=input_normalizer,
+                output_reduction=output_reduction,
+                output_normalizer=output_normalizer,
+            )
+            target_jacobians = jax.vmap(jax.jacobian(transform))(normalized_inputs)
+            model = fit_linear_sobolev(
+                form,
+                normalized_inputs,
+                normalized_outputs,
+                target_jacobians,
+                ridge=ridge,
+                derivative_weight=derivative_weight,
+            )
+        else:
+            model = fit_linear(form, normalized_inputs, normalized_outputs, ridge=ridge)
+        structure_cost = model.weights.shape[1]
     else:
-        model = fit_linear(form, normalized_inputs, normalized_outputs, ridge=ridge)
+        model = fit_max_affine(
+            form, normalized_inputs, normalized_outputs, key=jax.random.key(seed)
+        )
+        structure_cost = model.slopes.shape[1]
 
     surrogate = FittedSurrogate(
         input_reduction=input_reduction,
@@ -203,7 +213,8 @@ def fit(
             derivative_max=jnp.asarray(0.0),
             projection_mean=jnp.asarray(0.0),
             projection_max=jnp.asarray(0.0),
+            structure_cost=structure_cost,
         ),
     )
-    report = _error_report(surrogate, target, holdout_inputs, domain.unravel)
+    report = _error_report(surrogate, target, holdout_inputs, domain.unravel, structure_cost)
     return eqx.tree_at(lambda s: s.report, surrogate, report)

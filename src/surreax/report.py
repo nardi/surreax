@@ -22,3 +22,9 @@ class ErrorReport(eqx.Module):
     derivative_max: Float[Array, ""]
     projection_mean: Float[Array, ""]
     projection_max: Float[Array, ""]
+    structure_cost: int = eqx.field(static=True)
+    """Number of parts the model is built from, its basis terms or affine pieces.
+
+    A larger structure cost buys accuracy but makes the surrogate more expensive
+    to reason about later.
+    """

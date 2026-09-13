@@ -26,6 +26,7 @@ def test_sparse_fit_is_accurate_with_a_small_structure_cost() -> None:
         sx.ChebyshevPolynomial(degree=2),
         samples=200,
         sparse_terms=6,
+        worst_case_starts=0,
         seed=0,
     )
     assert float(surrogate.report.value_mean) < 1e-3
@@ -36,9 +37,24 @@ def test_sparse_beats_dense_when_samples_are_fewer_than_the_basis() -> None:
     domain = systems.high_dimensional_domain()
     form = sx.ChebyshevPolynomial(degree=3)
     # The degree-three basis over twelve inputs has far more terms than samples.
-    dense = sx.fit(systems.few_active_inputs, domain, form, samples=120, ridge=1e-6, seed=0)
+    dense = sx.fit(
+        systems.few_active_inputs,
+        domain,
+        form,
+        samples=120,
+        ridge=1e-6,
+        worst_case_starts=0,
+        seed=0,
+    )
     sparse = sx.fit(
-        systems.few_active_inputs, domain, form, samples=120, sparse_terms=8, ridge=1e-6, seed=0
+        systems.few_active_inputs,
+        domain,
+        form,
+        samples=120,
+        sparse_terms=8,
+        ridge=1e-6,
+        worst_case_starts=0,
+        seed=0,
     )
     assert float(sparse.report.value_mean) < float(dense.report.value_mean)
     assert surrogate_is_small(sparse)

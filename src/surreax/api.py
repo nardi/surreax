@@ -23,6 +23,7 @@ from surreax.forms.protocol import LinearForm
 from surreax.normalize import Normalizer
 from surreax.reduction import LinearReduction
 from surreax.report import ErrorReport
+from surreax.worst_case import worst_case
 
 Target = Callable[[PyTree[Array]], PyTree[Array]]
 """A pure JAX function from one input pytree to a pytree of outputs."""
@@ -67,6 +68,8 @@ def _error_report(
     inputs: Float[Array, "n d"],
     unravel: Unraveler,
     structure_cost: int,
+    worst_case_value: Float[Array, ""],
+    worst_case_point: Float[Array, " d"],
 ) -> ErrorReport:
     """Measure value and derivative error against the target on held-out points.
 
@@ -103,6 +106,8 @@ def _error_report(
         derivative_max=jnp.max(jacobian_residual),
         projection_mean=jnp.mean(projection_residual),
         projection_max=jnp.max(projection_residual),
+        worst_case=worst_case_value,
+        worst_case_point=worst_case_point,
         structure_cost=structure_cost,
     )
 
@@ -119,6 +124,9 @@ def fit(
     sparse_terms: int | None = None,
     reduce_inputs: reduction.InputReducer | None = None,
     reduce_outputs: reduction.OutputReducer | None = None,
+    worst_case_starts: int = 8,
+    worst_case_steps: int = 200,
+    worst_case_rate: float = 0.05,
     seed: int = 0,
 ) -> FittedSurrogate:
     """Fit a surrogate of `form` to `target` over `domain`.
@@ -129,7 +137,8 @@ def fit(
     the target Jacobian alongside its values. A `sparse_terms` budget fits a
     linear form by matching pursuit, keeping only that many basis terms. A
     `reduce_inputs` or `reduce_outputs` builder fits the model in a smaller
-    space.
+    space. The report's worst-case error is searched from `worst_case_starts`
+    random points, and setting that to zero skips the search.
     """
     inputs = sampling.sample(domain, samples, seed=seed)
     holdout_count = max(1, round(samples * holdout))
@@ -221,8 +230,31 @@ def fit(
             derivative_max=jnp.asarray(0.0),
             projection_mean=jnp.asarray(0.0),
             projection_max=jnp.asarray(0.0),
+            worst_case=jnp.asarray(0.0),
+            worst_case_point=jnp.zeros(input_dimension),
             structure_cost=structure_cost,
         ),
     )
-    report = _error_report(surrogate, target, holdout_inputs, domain.unravel, structure_cost)
+    if worst_case_starts > 0:
+        worst_case_value, worst_case_point = worst_case(
+            surrogate,
+            target,
+            domain,
+            starts=worst_case_starts,
+            steps=worst_case_steps,
+            learning_rate=worst_case_rate,
+            key=jax.random.key(seed + 1),
+        )
+    else:
+        worst_case_value = jnp.asarray(0.0)
+        worst_case_point = jnp.zeros(input_dimension)
+    report = _error_report(
+        surrogate,
+        target,
+        holdout_inputs,
+        domain.unravel,
+        structure_cost,
+        worst_case_value,
+        worst_case_point,
+    )
     return eqx.tree_at(lambda s: s.report, surrogate, report)

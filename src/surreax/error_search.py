@@ -1,9 +1,10 @@
-"""Largest error over the whole domain.
+"""Searching the domain for large error.
 
 The held-out error is a sample statistic, so it can miss a region where the fit
 is worst. Both the surrogate and the target are differentiable, so the error can
-be climbed with gradients instead. This maximizes the pointwise error over the
-box from several random starts and keeps the largest value found.
+be climbed with gradients instead, from several starts over the box. The largest
+result is the worst-case error for the report, and the climbed points are where
+adaptive sampling should add samples.
 
 The box constraint enters by a reparameterization: the optimizer works in an
 unbounded coordinate that maps into the box through a sigmoid, so there is no
@@ -25,7 +26,7 @@ from surreax.flatten import ravel
 
 
 @eqx.filter_jit
-def worst_case(
+def _search(
     surrogate: Callable[[PyTree[Array]], PyTree[Array]],
     target: Callable[[PyTree[Array]], PyTree[Array]],
     domain: Domain,
@@ -35,12 +36,11 @@ def worst_case(
     learning_rate: float,
     key: PRNGKeyArray,
     seed_points: Float[Array, "p d"],
-) -> tuple[Float[Array, ""], Float[Array, " d"]]:
-    """Find the largest surrogate error over the domain and where it occurs.
+) -> tuple[Float[Array, " starts"], Float[Array, "starts d"]]:
+    """Climb the error from every start and return each start's error and point.
 
-    Returns the error and the flat input that attains it. The search starts from
-    the highest-error points among `seed_points`, so it begins near a known-bad
-    region, and fills any remaining starts at random.
+    The search warm-starts from the highest-error points among `seed_points`, so
+    it begins near a known-bad region, and fills any remaining starts at random.
     """
     lower, upper = domain.bounds()
     width = upper - lower
@@ -70,7 +70,6 @@ def worst_case(
         point = point_of(found.value)
         return jnp.sqrt(squared_error(point)), point
 
-    # Rank the seed points by error and warm-start from the worst of them.
     seed_errors = jax.vmap(squared_error)(seed_points)
     warmest = jnp.argsort(-seed_errors)[: min(starts, seed_points.shape[0])]
     warm_starts = jax.vmap(unbounded_of)(seed_points[warmest])
@@ -78,6 +77,58 @@ def worst_case(
     random_starts = jax.random.normal(key, (random_count, lower.shape[0]))
     starts_unbounded = jnp.concatenate([warm_starts, random_starts])
 
-    errors, points = jax.vmap(climb)(starts_unbounded)
+    return jax.vmap(climb)(starts_unbounded)
+
+
+def worst_case(
+    surrogate: Callable[[PyTree[Array]], PyTree[Array]],
+    target: Callable[[PyTree[Array]], PyTree[Array]],
+    domain: Domain,
+    *,
+    starts: int,
+    steps: int,
+    learning_rate: float,
+    key: PRNGKeyArray,
+    seed_points: Float[Array, "p d"],
+) -> tuple[Float[Array, ""], Float[Array, " d"]]:
+    """Find the largest surrogate error over the domain and where it occurs."""
+    errors, points = _search(
+        surrogate,
+        target,
+        domain,
+        starts=starts,
+        steps=steps,
+        learning_rate=learning_rate,
+        key=key,
+        seed_points=seed_points,
+    )
     best = jnp.argmax(errors)
     return errors[best], points[best]
+
+
+def high_error_points(
+    surrogate: Callable[[PyTree[Array]], PyTree[Array]],
+    target: Callable[[PyTree[Array]], PyTree[Array]],
+    domain: Domain,
+    *,
+    count: int,
+    steps: int,
+    learning_rate: float,
+    key: PRNGKeyArray,
+    seed_points: Float[Array, "p d"],
+) -> Float[Array, "count d"]:
+    """Points of large surrogate error, one climbed from each of `count` starts.
+
+    These are where a refit should add samples, since the fit is worst there.
+    """
+    _, points = _search(
+        surrogate,
+        target,
+        domain,
+        starts=count,
+        steps=steps,
+        learning_rate=learning_rate,
+        key=key,
+        seed_points=seed_points,
+    )
+    return points

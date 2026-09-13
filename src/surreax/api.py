@@ -15,6 +15,7 @@ from jaxtyping import Array, Float, PyTree
 
 from surreax import normalize, reduction, sampling
 from surreax.domain import Domain
+from surreax.error_search import high_error_points, worst_case
 from surreax.fitted import FittedSurrogate
 from surreax.fitting import fit_linear, fit_linear_sobolev, fit_linear_sparse
 from surreax.flatten import Unraveler, ravel, ravel_example
@@ -23,7 +24,6 @@ from surreax.forms.protocol import LinearForm
 from surreax.normalize import Normalizer
 from surreax.reduction import LinearReduction
 from surreax.report import ErrorReport
-from surreax.worst_case import worst_case
 
 Target = Callable[[PyTree[Array]], PyTree[Array]]
 """A pure JAX function from one input pytree to a pytree of outputs."""
@@ -128,6 +128,7 @@ def fit(
     worst_case_starts: int = 8,
     worst_case_steps: int = 200,
     worst_case_rate: float = 0.05,
+    inputs: Float[Array, "n d"] | None = None,
     seed: int = 0,
 ) -> FittedSurrogate:
     """Fit a surrogate of `form` to `target` over `domain`.
@@ -139,10 +140,13 @@ def fit(
     linear form by matching pursuit, keeping only that many basis terms. A
     `reduce_inputs` or `reduce_outputs` builder fits the model in a smaller
     space. The report's worst-case error is searched from `worst_case_starts`
-    random points, and setting that to zero skips the search.
+    random points, and setting that to zero skips the search. Passing `inputs`
+    fits on those flat points instead of sampling the domain, which is how
+    adaptive sampling refits on a growing set.
     """
-    inputs = sampling.sample(domain, samples, seed=seed)
-    holdout_count = max(1, round(samples * holdout))
+    if inputs is None:
+        inputs = sampling.sample(domain, samples, seed=seed)
+    holdout_count = max(1, round(inputs.shape[0] * holdout))
     train_inputs = inputs[:-holdout_count]
     holdout_inputs = inputs[-holdout_count:]
 
@@ -260,3 +264,72 @@ def fit(
         worst_case_point,
     )
     return eqx.tree_at(lambda s: s.report, surrogate, report)
+
+
+def fit_adaptive(
+    target: Target,
+    domain: Domain,
+    form: LinearForm | MaxAffineForm,
+    *,
+    initial_samples: int = 256,
+    points_per_round: int = 32,
+    rounds: int = 5,
+    tolerance: float = 1e-3,
+    holdout: float = 0.2,
+    ridge: float = 1e-8,
+    derivative_weight: float = 0.0,
+    worst_case_starts: int = 8,
+    worst_case_steps: int = 200,
+    worst_case_rate: float = 0.05,
+    seed: int = 0,
+) -> FittedSurrogate:
+    """Fit while adding samples where the surrogate is worst.
+
+    Fits on an initial low-discrepancy sample, then repeats: locate the
+    highest-error points with the domain search, add them to the sample, and
+    refit. Stops when the worst-case error falls below `tolerance` or after
+    `rounds`. Because the target is callable, the sample is not a fixed resource,
+    so this spends points where the fit needs them.
+    """
+    inputs = sampling.sample(domain, initial_samples, seed=seed)
+    surrogate = fit(
+        target,
+        domain,
+        form,
+        holdout=holdout,
+        ridge=ridge,
+        derivative_weight=derivative_weight,
+        worst_case_starts=worst_case_starts,
+        worst_case_steps=worst_case_steps,
+        worst_case_rate=worst_case_rate,
+        inputs=inputs,
+        seed=seed,
+    )
+    for extra in range(rounds):
+        if float(surrogate.report.worst_case) < tolerance:
+            break
+        new_points = high_error_points(
+            surrogate,
+            target,
+            domain,
+            count=points_per_round,
+            steps=worst_case_steps,
+            learning_rate=worst_case_rate,
+            key=jax.random.key(seed + extra + 2),
+            seed_points=inputs,
+        )
+        inputs = jnp.concatenate([inputs, new_points])
+        surrogate = fit(
+            target,
+            domain,
+            form,
+            holdout=holdout,
+            ridge=ridge,
+            derivative_weight=derivative_weight,
+            worst_case_starts=worst_case_starts,
+            worst_case_steps=worst_case_steps,
+            worst_case_rate=worst_case_rate,
+            inputs=inputs,
+            seed=seed,
+        )
+    return surrogate

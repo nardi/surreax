@@ -10,7 +10,7 @@ import jax.numpy as jnp
 import pytest
 
 import surreax as sx
-from surreax.worst_case import worst_case
+from surreax.error_search import worst_case
 from tests import systems
 
 

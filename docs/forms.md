@@ -101,3 +101,36 @@ surrogate = sx.fit(convex, domain, sx.MaxAffineForm(pieces=2), samples=256)
 assert float(surrogate.report.value_max) < 1e-2
 assert surrogate.report.structure_cost == 2
 ```
+
+## Difference of max-affine
+
+Subtracting one convex max-affine function from another gives a general
+piecewise linear function, so this form fits a target that is not convex, which
+a single max-affine cannot. The fit also carries a convex-plus-concave
+decomposition, which some later algorithms rely on. There is a dedicated
+literature on fitting in this difference-of-convex form.
+
+The difference is not convex and not linear in its parameters, so it fits by
+gradient descent through optimistix from several restarts, each started from a
+plain max-affine fit of the positive part. You choose the number of pieces per
+part, and the structure cost is the total across both.
+
+<!-- name: test_forms_difference -->
+```python
+import jax.numpy as jnp
+import surreax as sx
+
+
+def wave(x):
+    # Neither convex nor concave, so a single max-affine cannot fit it.
+    positive = jnp.maximum(2 * x[0] - x[1], x[0] + 2 * x[1])
+    negative = jnp.maximum(-x[0], x[1])
+    return (positive - negative)[None]
+
+
+domain = sx.box([-1.0, -1.0], [1.0, 1.0])
+form = sx.DifferenceOfMaxAffineForm(pieces=2, restarts=6, steps=400)
+surrogate = sx.fit(wave, domain, form, samples=400, worst_case_starts=0)
+assert float(surrogate.report.value_max) < 1e-2
+assert surrogate.report.structure_cost == 4
+```

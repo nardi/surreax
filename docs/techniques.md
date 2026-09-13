@@ -100,3 +100,59 @@ surrogate = sx.fit(target, domain, sx.Affine(), samples=128, sparse_terms=3)
 assert float(surrogate.report.value_max) < 1e-3
 assert surrogate.report.structure_cost <= 3
 ```
+
+## Worst-case error
+
+The value and derivative errors in the report are measured on a held-out
+sample, so they can miss a region where the fit is worst. Because the surrogate
+and the target are both differentiable, `fit` also climbs the error over the
+whole domain from several starts and reports the largest it finds, along with
+the point where it occurs. This is a tighter check than a sample statistic, and
+setting `worst_case_starts` to zero skips it when speed matters.
+
+<!-- name: test_techniques_worst_case -->
+```python
+import jax.numpy as jnp
+import surreax as sx
+
+
+def target(x):
+    return (jnp.sin(3 * x[0]) * jnp.cos(3 * x[1]))[None]
+
+
+domain = sx.box([-1.0, -1.0], [1.0, 1.0])
+surrogate = sx.fit(target, domain, sx.ChebyshevPolynomial(degree=2), samples=128)
+report = surrogate.report
+# The domain search cannot do better than the held-out sample it contains.
+assert float(report.worst_case) >= float(report.value_max) - 1e-5
+```
+
+## Adaptive sampling
+
+Because the target is callable, the sample is not a fixed resource, so the fit
+can add points where it is worst instead of committing to one grid. `fit_adaptive`
+fits on an initial sample, locates the highest-error points with the domain
+search, adds them, and refits, stopping when the worst-case error meets a
+tolerance or after a round budget. This is the residual-based adaptive
+refinement of the surrogate-modeling literature, such as DeepXDE, from Lu and
+colleagues, [DeepXDE](https://arxiv.org/abs/1907.04502), SIAM Review 63(1),
+2021.
+
+<!-- name: test_techniques_adaptive -->
+```python
+import jax.numpy as jnp
+import surreax as sx
+
+
+def bump(x):
+    return (jnp.exp(-8 * (x[0] ** 2 + x[1] ** 2)))[None]
+
+
+domain = sx.box([-1.0, -1.0], [1.0, 1.0])
+form = sx.ChebyshevPolynomial(degree=6)
+adaptive = sx.fit_adaptive(
+    bump, domain, form, initial_samples=128, points_per_round=32, rounds=4, worst_case_steps=120
+)
+fixed = sx.fit(bump, domain, form, samples=256, worst_case_steps=120)
+assert float(adaptive.report.worst_case) < float(fixed.report.worst_case)
+```

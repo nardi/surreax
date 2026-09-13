@@ -21,6 +21,7 @@ from surreax.forms import (
 from surreax.implicit import ImplicitSurrogate, Residual, fit_implicit
 from surreax.reduction import active_subspace_inputs, pca_inputs, pca_outputs
 from surreax.report import ErrorReport
+from surreax.structure import Structure, analyze, prune_inputs
 
 __all__ = [
     "Affine",
@@ -38,8 +39,10 @@ __all__ = [
     "Network",
     "NetworkForm",
     "Residual",
+    "Structure",
     "Target",
     "active_subspace_inputs",
+    "analyze",
     "box",
     "box_from_data",
     "fit",
@@ -47,4 +50,5 @@ __all__ = [
     "fit_implicit",
     "pca_inputs",
     "pca_outputs",
+    "prune_inputs",
 ]

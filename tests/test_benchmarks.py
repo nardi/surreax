@@ -10,6 +10,7 @@ import jax.numpy as jnp
 import pytest
 
 import surreax as sx
+from surreax.worst_case import worst_case
 from tests import systems
 
 
@@ -49,3 +50,25 @@ def test_benchmark_jacobian_call(benchmark, surrogate: sx.FittedSurrogate) -> No
     point = jnp.array([12.0, 0.7])
     jax.block_until_ready(call(point))
     benchmark(lambda: jax.block_until_ready(call(point)))
+
+
+def test_benchmark_worst_case_search(benchmark, surrogate: sx.FittedSurrogate) -> None:
+    domain = systems.projectile_domain()
+    lower, upper = domain.bounds()
+    seeds = lower + (upper - lower) * jax.random.uniform(jax.random.key(0), (32, 2))
+
+    def search() -> jax.Array:
+        value, _ = worst_case(
+            surrogate,
+            systems.projectile_range,
+            domain,
+            starts=8,
+            steps=100,
+            learning_rate=0.05,
+            key=jax.random.key(0),
+            seed_points=seeds,
+        )
+        return jax.block_until_ready(value)
+
+    search()
+    benchmark(search)

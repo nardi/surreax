@@ -34,6 +34,7 @@ dev = [
     "ty>=0.0.1a1",
     "markdown-pytest>=0.4",
     "zensical>=0.0.61",
+    "pyinstrument>=4.6",
 ]
 
 [tool.ruff]

@@ -72,8 +72,12 @@ def _refine(augmented, target, start, learning_rate, steps):
     return result.value
 
 
-def _fit_one_output(augmented, target, form, key):
-    """Fit the two plane sets for one output, keeping the best of the restarts."""
+def _fit_one_output(augmented, target, form, key, initial):
+    """Fit the two plane sets for one output, keeping the best of the restarts.
+
+    When `initial` planes are given, they refine as an extra candidate, so a warm
+    start can only improve the result.
+    """
 
     def restart(restart_key):
         positive_key, negative_key = jax.random.split(restart_key)
@@ -81,10 +85,29 @@ def _fit_one_output(augmented, target, form, key):
         negative = 0.01 * jax.random.normal(negative_key, (form.pieces, augmented.shape[1]))
         return _refine(augmented, target, (positive, negative), form.learning_rate, form.steps)
 
-    candidates = jax.vmap(restart)(jax.random.split(key, form.restarts))
-    errors = jax.vmap(lambda parts: _error(parts, augmented, target))(candidates)
+    positives, negatives = jax.vmap(restart)(jax.random.split(key, form.restarts))
+    if initial is not None:
+        refined = _refine(augmented, target, initial, form.learning_rate, form.steps)
+        positives = jnp.concatenate([positives, refined[0][None]])
+        negatives = jnp.concatenate([negatives, refined[1][None]])
+    errors = jax.vmap(lambda parts: _error(parts, augmented, target))((positives, negatives))
     best = jnp.argmin(errors)
-    return candidates[0][best], candidates[1][best]
+    return positives[best], negatives[best]
+
+
+def _as_parts(
+    model: "DifferenceOfMaxAffine | None",
+) -> tuple[Float[Array, "k m p"], Float[Array, "k m p"]] | None:
+    """Pack a fitted model's two plane sets back into plane rows."""
+    if model is None:
+        return None
+    positive = jnp.concatenate(
+        [model.positive_intercepts[:, :, None], model.positive_slopes], axis=-1
+    )
+    negative = jnp.concatenate(
+        [model.negative_intercepts[:, :, None], model.negative_slopes], axis=-1
+    )
+    return positive, negative
 
 
 def fit_difference_max_affine(
@@ -93,14 +116,28 @@ def fit_difference_max_affine(
     targets: Float[Array, "n k"],
     *,
     key: PRNGKeyArray,
+    initial: "DifferenceOfMaxAffine | None" = None,
 ) -> DifferenceOfMaxAffine:
-    """Fit a difference of two max-affine models to each output coordinate."""
+    """Fit a difference of two max-affine models to each output coordinate.
+
+    An `initial` model seeds an extra candidate per output, so a refit reuses a
+    previous fit.
+    """
     augmented = _augment(inputs)
     output_keys = jax.random.split(key, targets.shape[1])
-    positive, negative = jax.vmap(
-        lambda column, output_key: _fit_one_output(augmented, column, form, output_key),
-        in_axes=(1, 0),
-    )(targets, output_keys)
+    parts = _as_parts(initial)
+    if parts is None:
+        positive, negative = jax.vmap(
+            lambda column, output_key: _fit_one_output(augmented, column, form, output_key, None),
+            in_axes=(1, 0),
+        )(targets, output_keys)
+    else:
+        positive, negative = jax.vmap(
+            lambda column, output_key, start_positive, start_negative: _fit_one_output(
+                augmented, column, form, output_key, (start_positive, start_negative)
+            ),
+            in_axes=(1, 0, 0, 0),
+        )(targets, output_keys, parts[0], parts[1])
     return DifferenceOfMaxAffine(
         positive_slopes=positive[:, :, 1:],
         positive_intercepts=positive[:, :, 0],

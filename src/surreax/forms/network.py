@@ -57,21 +57,28 @@ def fit_network(
     key: PRNGKeyArray,
     jacobians: Float[Array, "n k d"] | None = None,
     derivative_weight: float = 0.0,
+    initial: "Network | None" = None,
 ) -> Network:
     """Fit a feedforward network by minimizing the mean squared error.
 
     A positive `derivative_weight` with `jacobians` adds a Jacobian term, so the
-    network matches target derivatives as well as values.
+    network matches target derivatives as well as values. An `initial` network
+    seeds the optimizer, so a refit continues from a previous fit.
     """
-    mlp = eqx.nn.MLP(
-        in_size=inputs.shape[1],
-        out_size=targets.shape[1],
-        width_size=form.width,
-        depth=form.depth,
-        activation=form.activation,
-        key=key,
-    )
-    params, static = eqx.partition(Network(mlp=mlp), eqx.is_inexact_array)
+    if initial is None:
+        start = Network(
+            mlp=eqx.nn.MLP(
+                in_size=inputs.shape[1],
+                out_size=targets.shape[1],
+                width_size=form.width,
+                depth=form.depth,
+                activation=form.activation,
+                key=key,
+            )
+        )
+    else:
+        start = initial
+    params, static = eqx.partition(start, eqx.is_inexact_array)
 
     def loss(trained, _):
         model = eqx.combine(trained, static)

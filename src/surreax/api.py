@@ -20,11 +20,12 @@ from surreax.fitted import FittedSurrogate
 from surreax.fitting import fit_linear, fit_linear_sobolev, fit_linear_sparse
 from surreax.flatten import Unraveler, ravel, ravel_example
 from surreax.forms.difference_max_affine import (
+    DifferenceOfMaxAffine,
     DifferenceOfMaxAffineForm,
     fit_difference_max_affine,
 )
-from surreax.forms.max_affine import MaxAffineForm, fit_max_affine
-from surreax.forms.network import NetworkForm, fit_network, parameter_count
+from surreax.forms.max_affine import MaxAffine, MaxAffineForm, fit_max_affine
+from surreax.forms.network import Network, NetworkForm, fit_network, parameter_count
 from surreax.forms.protocol import LinearForm
 from surreax.normalize import Normalizer
 from surreax.reduction import LinearReduction
@@ -134,6 +135,7 @@ def fit(
     worst_case_steps: int = 200,
     worst_case_rate: float = 0.05,
     inputs: Float[Array, "n d"] | None = None,
+    warm_start: FittedSurrogate | None = None,
     seed: int = 0,
 ) -> FittedSurrogate:
     """Fit a surrogate of `form` to `target` over `domain`.
@@ -206,6 +208,9 @@ def fit(
         )
         target_jacobians = jax.vmap(jax.jacobian(transform))(normalized_inputs)
 
+    # An iterative fit can reuse a previous model of the same kind as a start.
+    previous = warm_start.model if warm_start is not None else None
+
     match form:
         case LinearForm():
             if sparse_terms is not None:
@@ -227,12 +232,20 @@ def fit(
             structure_cost = int(jnp.sum(jnp.any(model.weights != 0, axis=0)))
         case MaxAffineForm():
             model = fit_max_affine(
-                form, normalized_inputs, normalized_outputs, key=jax.random.key(seed)
+                form,
+                normalized_inputs,
+                normalized_outputs,
+                key=jax.random.key(seed),
+                initial=previous if isinstance(previous, MaxAffine) else None,
             )
             structure_cost = model.slopes.shape[1]
         case DifferenceOfMaxAffineForm():
             model = fit_difference_max_affine(
-                form, normalized_inputs, normalized_outputs, key=jax.random.key(seed)
+                form,
+                normalized_inputs,
+                normalized_outputs,
+                key=jax.random.key(seed),
+                initial=previous if isinstance(previous, DifferenceOfMaxAffine) else None,
             )
             structure_cost = model.positive_slopes.shape[1] + model.negative_slopes.shape[1]
         case NetworkForm():
@@ -243,6 +256,7 @@ def fit(
                 key=jax.random.key(seed),
                 jacobians=target_jacobians,
                 derivative_weight=derivative_weight,
+                initial=previous if isinstance(previous, Network) else None,
             )
             structure_cost = parameter_count(model)
         case _:
@@ -358,6 +372,7 @@ def fit_adaptive(
             worst_case_steps=worst_case_steps,
             worst_case_rate=worst_case_rate,
             inputs=inputs,
+            warm_start=surrogate,
             seed=seed,
         )
     return surrogate

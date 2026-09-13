@@ -116,13 +116,12 @@ def _gradient(
     return result.value
 
 
-def _fit_one_output(
-    augmented: Float[Array, "n p"],
-    target: Float[Array, " n"],
-    form: MaxAffineForm,
-    key: PRNGKeyArray,
-) -> Float[Array, "m p"]:
-    """Fit the planes for one output coordinate, keeping the best of the restarts."""
+def _fit_one_output(augmented, target, form, key, initial):
+    """Fit the planes for one output coordinate, keeping the best of the restarts.
+
+    When `initial` planes are given, they join the restarts as an extra
+    candidate, so a warm start can only improve the result, never worsen it.
+    """
     keys = jax.random.split(key, form.restarts)
     candidates = jax.vmap(
         lambda k: _alternating(augmented, target, form.pieces, form.iterations, k)
@@ -131,8 +130,17 @@ def _fit_one_output(
         candidates = jax.vmap(
             lambda start: _gradient(augmented, target, start, form.learning_rate, form.steps)
         )(candidates)
+    if initial is not None:
+        candidates = jnp.concatenate([candidates, initial[None]])
     errors = jax.vmap(lambda planes: _mean_squared_error(planes, augmented, target))(candidates)
     return candidates[jnp.argmin(errors)]
+
+
+def _as_planes(model: "MaxAffine | None") -> Float[Array, "k m p"] | None:
+    """Pack a fitted model's slopes and intercepts back into plane rows."""
+    if model is None:
+        return None
+    return jnp.concatenate([model.intercepts[:, :, None], model.slopes], axis=-1)
 
 
 def fit_max_affine(
@@ -141,12 +149,26 @@ def fit_max_affine(
     targets: Float[Array, "n k"],
     *,
     key: PRNGKeyArray,
+    initial: "MaxAffine | None" = None,
 ) -> MaxAffine:
-    """Fit a convex max-affine model to each output coordinate."""
+    """Fit a convex max-affine model to each output coordinate.
+
+    An `initial` model seeds an extra candidate per output, so a refit reuses a
+    previous fit.
+    """
     augmented = _augment(inputs)
     output_keys = jax.random.split(key, targets.shape[1])
-    planes = jax.vmap(
-        lambda column, output_key: _fit_one_output(augmented, column, form, output_key),
-        in_axes=(1, 0),
-    )(targets, output_keys)
+    initial_planes = _as_planes(initial)
+    if initial_planes is None:
+        planes = jax.vmap(
+            lambda column, output_key: _fit_one_output(augmented, column, form, output_key, None),
+            in_axes=(1, 0),
+        )(targets, output_keys)
+    else:
+        planes = jax.vmap(
+            lambda column, output_key, start: _fit_one_output(
+                augmented, column, form, output_key, start
+            ),
+            in_axes=(1, 0, 0),
+        )(targets, output_keys, initial_planes)
     return MaxAffine(slopes=planes[:, :, 1:], intercepts=planes[:, :, 0])

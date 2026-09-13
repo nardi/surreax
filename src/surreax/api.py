@@ -5,6 +5,7 @@ linear solve in a normalized reduced space, and measures held-out error. It
 returns a `FittedSurrogate` with the target's signature.
 """
 
+import functools
 from collections.abc import Callable
 
 import equinox as eqx
@@ -15,13 +16,36 @@ from jaxtyping import Array, Float, PyTree
 from surreax import normalize, reduction, sampling
 from surreax.domain import Domain
 from surreax.fitted import FittedSurrogate
-from surreax.fitting import fit_linear
+from surreax.fitting import fit_linear, fit_linear_sobolev
 from surreax.flatten import Unraveler, ravel, ravel_example
 from surreax.forms.protocol import LinearForm
+from surreax.normalize import Normalizer
+from surreax.reduction import LinearReduction
 from surreax.report import ErrorReport
 
 Target = Callable[[PyTree[Array]], PyTree[Array]]
 """A pure JAX function from one input pytree to a pytree of outputs."""
+
+
+def _normalized_target(
+    point: Float[Array, " d"],
+    *,
+    target: Target,
+    domain: Domain,
+    input_reduction: LinearReduction,
+    input_normalizer: Normalizer,
+    output_reduction: LinearReduction,
+    output_normalizer: Normalizer,
+) -> Float[Array, " k"]:
+    """The target in the model's normalized reduced coordinates.
+
+    Inverts the input transform to reach a real input, evaluates the target, and
+    applies the output transform, so its Jacobian is the Jacobian the model
+    fits against.
+    """
+    flat_input = input_reduction.inverse(input_normalizer.inverse(point))
+    flat_output = ravel(target(domain.unravel(flat_input)))
+    return output_normalizer.forward(output_reduction.forward(flat_output))
 
 
 def _flatten_batch(trees: PyTree[Array]) -> Float[Array, "n k"]:
@@ -73,12 +97,15 @@ def fit(
     samples: int = 512,
     holdout: float = 0.2,
     ridge: float = 1e-8,
+    derivative_weight: float = 0.0,
     seed: int = 0,
 ) -> FittedSurrogate:
     """Fit a surrogate of `form` to `target` over `domain`.
 
     Samples the domain with a low-discrepancy sequence, holds out a fraction for
-    the error report, and fits the form by one regularized linear solve.
+    the error report, and fits the form by one regularized linear solve. A
+    positive `derivative_weight` turns on Sobolev training, which fits against
+    the target Jacobian alongside its values.
     """
     inputs = sampling.sample(domain, samples, seed=seed)
     holdout_count = max(1, round(samples * holdout))
@@ -106,7 +133,27 @@ def fit(
     output_normalizer = normalize.from_moments(encoded_outputs)
     normalized_outputs = jax.vmap(output_normalizer.forward)(encoded_outputs)
 
-    model = fit_linear(form, normalized_inputs, normalized_outputs, ridge=ridge)
+    if derivative_weight > 0.0:
+        transform = functools.partial(
+            _normalized_target,
+            target=target,
+            domain=domain,
+            input_reduction=input_reduction,
+            input_normalizer=input_normalizer,
+            output_reduction=output_reduction,
+            output_normalizer=output_normalizer,
+        )
+        target_jacobians = jax.vmap(jax.jacobian(transform))(normalized_inputs)
+        model = fit_linear_sobolev(
+            form,
+            normalized_inputs,
+            normalized_outputs,
+            target_jacobians,
+            ridge=ridge,
+            derivative_weight=derivative_weight,
+        )
+    else:
+        model = fit_linear(form, normalized_inputs, normalized_outputs, ridge=ridge)
 
     surrogate = FittedSurrogate(
         input_reduction=input_reduction,

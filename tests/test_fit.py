@@ -113,6 +113,29 @@ def test_dataset_domain_fits_over_inferred_bounds() -> None:
     assert float(surrogate.report.value_max) < 1e-3
 
 
+def test_derivative_supervision_recovers_an_affine_target() -> None:
+    coefficients = jnp.array([2.0, -1.0])
+
+    def target(x: jax.Array) -> jax.Array:
+        return (coefficients @ x + 3.0)[None]
+
+    domain = sx.box([-1.0, -1.0], [1.0, 1.0])
+    surrogate = sx.fit(target, domain, sx.Affine(), samples=128, derivative_weight=1.0)
+    assert float(surrogate.report.value_max) < 1e-3
+    assert float(surrogate.report.derivative_max) < 1e-3
+
+
+def test_derivative_supervision_lowers_derivative_error() -> None:
+    def target(x: jax.Array) -> jax.Array:
+        return (jnp.sin(x[0]) + jnp.cos(2 * x[1]))[None]
+
+    domain = sx.box([-1.0, -1.0], [1.0, 1.0])
+    form = sx.ChebyshevPolynomial(degree=3)
+    value_only = sx.fit(target, domain, form, samples=256, derivative_weight=0.0)
+    sobolev = sx.fit(target, domain, form, samples=256, derivative_weight=1.0)
+    assert float(sobolev.report.derivative_max) < float(value_only.report.derivative_max)
+
+
 def test_box_unravels_a_pytree_bound_round_trip() -> None:
     domain = systems.oscillator_domain()
     lower, _ = domain.bounds()

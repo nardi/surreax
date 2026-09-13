@@ -65,6 +65,16 @@ def test_iterative_refinement_drives_the_residual_down() -> None:
     assert float(refined.report.value_mean) < float(base.report.value_mean) / 5
 
 
+def test_objective_route_leaves_a_small_residual() -> None:
+    domain = sx.box([-2.0], [2.0])
+    form = sx.ChebyshevPolynomial(degree=4)
+    # The objective route fits f directly by minimizing the residual, no inversion.
+    surrogate = sx.fit_implicit_objective(
+        _cubic, domain, form, unknown_dimension=1, samples=256, steps=600
+    )
+    assert float(surrogate.report.value_mean) < 0.15
+
+
 def test_implicit_surrogate_survives_jit_vmap_and_grad() -> None:
     def residual(x: jax.Array, y: jax.Array) -> jax.Array:
         return y - 2.0 * x

@@ -19,12 +19,14 @@ from collections.abc import Callable
 import equinox as eqx
 import jax
 import jax.numpy as jnp
+import optax
+import optimistix as optx
 from jaxtyping import Array, Float
 
 from surreax import normalize, reduction, sampling
 from surreax.domain import Domain, box_from_data
 from surreax.fitted import FittedSurrogate
-from surreax.fitting import fit_linear
+from surreax.fitting import LinearModel, fit_linear
 from surreax.flatten import ravel_example
 from surreax.forms.protocol import LinearForm
 from surreax.report import ErrorReport
@@ -188,4 +190,65 @@ def fit_implicit(
     report = _value_report(
         jnp.mean(left), jnp.max(left), inputs.shape[1], inverse_map.report.structure_cost
     )
+    return eqx.tree_at(lambda s: s.report, surrogate, report)
+
+
+def fit_implicit_objective(
+    residual: Residual,
+    domain: Domain,
+    form: LinearForm,
+    unknown_dimension: int,
+    *,
+    samples: int = 512,
+    holdout: float = 0.2,
+    steps: int = 500,
+    learning_rate: float = 0.01,
+    seed: int = 0,
+) -> FittedSurrogate:
+    """Fit `f` directly by minimizing the residual it leaves, without inverting.
+
+    This is the objective-based route. It scores a linear form by
+    `mean ||g(x, f(x))||^2` over sampled inputs and minimizes that through the
+    optimistix backend, so it never solves or inverts anything. It is
+    experimental: the objective is indifferent between solution branches, so it
+    can converge to a biased mixture when the residual has several solutions.
+    Prefer `fit_implicit` unless the solve is the bottleneck.
+    """
+    inputs = sampling.sample(domain, samples, seed=seed)
+    holdout_count = max(1, round(samples * holdout))
+    train_inputs, holdout_inputs = inputs[:-holdout_count], inputs[-holdout_count:]
+
+    lower, upper = domain.bounds()
+    input_normalizer = normalize.from_bounds(lower, upper)
+    normalized = jax.vmap(input_normalizer.forward)(train_inputs)
+    feature_count = form.features(normalized[0]).shape[0]
+
+    def leftover(weights, point, normalized_point):
+        return residual(point, weights @ form.features(normalized_point))
+
+    def loss(weights, _):
+        residuals = jax.vmap(lambda x, z: leftover(weights, x, z))(train_inputs, normalized)
+        return jnp.mean(residuals**2)
+
+    solver = optx.OptaxMinimiser(optax.adam(learning_rate), rtol=1e-8, atol=1e-8)
+    start = jnp.zeros((unknown_dimension, feature_count))
+    weights = optx.minimise(loss, solver, start, max_steps=steps, throw=False).value
+
+    identity_output = normalize.Normalizer(
+        center=jnp.zeros(unknown_dimension), scale=jnp.ones(unknown_dimension)
+    )
+    _, output_unravel = ravel_example(jnp.zeros(unknown_dimension))
+    surrogate = FittedSurrogate(
+        input_reduction=reduction.identity(inputs.shape[1]),
+        input_normalizer=input_normalizer,
+        model=LinearModel(weights=weights, form=form),
+        output_normalizer=identity_output,
+        output_reduction=reduction.identity(unknown_dimension),
+        output_unravel=output_unravel,
+        domain=domain,
+        report=_zero_report(inputs.shape[1]),
+    )
+    predicted = jax.vmap(surrogate)(holdout_inputs)
+    left = jnp.linalg.norm(jax.vmap(residual)(holdout_inputs, predicted), axis=1)
+    report = _value_report(jnp.mean(left), jnp.max(left), inputs.shape[1], feature_count)
     return eqx.tree_at(lambda s: s.report, surrogate, report)

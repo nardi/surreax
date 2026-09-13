@@ -23,7 +23,9 @@ def test_affine_form_recovers_an_affine_target(weights: list[float], bias: float
         return (coefficients @ x + bias)[None]
 
     domain = sx.box([-1.0, -1.0, -1.0], [1.0, 1.0, 1.0])
-    surrogate = sx.fit(target, domain, sx.Affine(), samples=128, seed=0)
+    # This property test does not check the worst-case error, so skip the search
+    # rather than run it on every generated example.
+    surrogate = sx.fit(target, domain, sx.Affine(), samples=128, worst_case_starts=0, seed=0)
     assert float(surrogate.report.value_max) < 1e-3
 
 

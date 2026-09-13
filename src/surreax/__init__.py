@@ -18,6 +18,7 @@ from surreax.forms import (
     Network,
     NetworkForm,
 )
+from surreax.implicit import ImplicitSurrogate, Residual, fit_implicit
 from surreax.reduction import active_subspace_inputs, pca_inputs, pca_outputs
 from surreax.report import ErrorReport
 
@@ -30,17 +31,20 @@ __all__ = [
     "Domain",
     "ErrorReport",
     "FittedSurrogate",
+    "ImplicitSurrogate",
     "LinearForm",
     "MaxAffine",
     "MaxAffineForm",
     "Network",
     "NetworkForm",
+    "Residual",
     "Target",
     "active_subspace_inputs",
     "box",
     "box_from_data",
     "fit",
     "fit_adaptive",
+    "fit_implicit",
     "pca_inputs",
     "pca_outputs",
 ]

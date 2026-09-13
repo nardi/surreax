@@ -7,7 +7,15 @@ returns a `FittedSurrogate` that keeps the chosen form.
 from surreax.api import Target, fit, fit_adaptive
 from surreax.domain import Box, Domain, box, box_from_data
 from surreax.fitted import FittedSurrogate
-from surreax.forms import Affine, ChebyshevPolynomial, LinearForm, MaxAffine, MaxAffineForm
+from surreax.forms import (
+    Affine,
+    ChebyshevPolynomial,
+    DifferenceOfMaxAffine,
+    DifferenceOfMaxAffineForm,
+    LinearForm,
+    MaxAffine,
+    MaxAffineForm,
+)
 from surreax.reduction import active_subspace_inputs, pca_inputs, pca_outputs
 from surreax.report import ErrorReport
 
@@ -15,6 +23,8 @@ __all__ = [
     "Affine",
     "Box",
     "ChebyshevPolynomial",
+    "DifferenceOfMaxAffine",
+    "DifferenceOfMaxAffineForm",
     "Domain",
     "ErrorReport",
     "FittedSurrogate",

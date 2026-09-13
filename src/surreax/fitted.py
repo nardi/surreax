@@ -12,6 +12,7 @@ from jaxtyping import Array, PyTree
 from surreax.domain import Domain
 from surreax.fitting import LinearModel
 from surreax.flatten import Unraveler, ravel
+from surreax.forms.difference_max_affine import DifferenceOfMaxAffine
 from surreax.forms.max_affine import MaxAffine
 from surreax.normalize import Normalizer
 from surreax.reduction import LinearReduction
@@ -27,7 +28,7 @@ class FittedSurrogate(eqx.Module):
 
     input_reduction: LinearReduction
     input_normalizer: Normalizer
-    model: LinearModel | MaxAffine
+    model: LinearModel | MaxAffine | DifferenceOfMaxAffine
     output_normalizer: Normalizer
     output_reduction: LinearReduction
     output_unravel: Unraveler = eqx.field(static=True)

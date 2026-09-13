@@ -19,6 +19,10 @@ from surreax.error_search import high_error_points, worst_case
 from surreax.fitted import FittedSurrogate
 from surreax.fitting import fit_linear, fit_linear_sobolev, fit_linear_sparse
 from surreax.flatten import Unraveler, ravel, ravel_example
+from surreax.forms.difference_max_affine import (
+    DifferenceOfMaxAffineForm,
+    fit_difference_max_affine,
+)
 from surreax.forms.max_affine import MaxAffineForm, fit_max_affine
 from surreax.forms.protocol import LinearForm
 from surreax.normalize import Normalizer
@@ -116,7 +120,7 @@ def _error_report(
 def fit(
     target: Target,
     domain: Domain,
-    form: LinearForm | MaxAffineForm,
+    form: LinearForm | MaxAffineForm | DifferenceOfMaxAffineForm,
     *,
     samples: int = 512,
     holdout: float = 0.2,
@@ -214,11 +218,16 @@ def fit(
             model = fit_linear(form, normalized_inputs, normalized_outputs, ridge=ridge)
         # Count the basis terms the fit actually uses, which the sparse fit trims.
         structure_cost = int(jnp.sum(jnp.any(model.weights != 0, axis=0)))
-    else:
+    elif isinstance(form, MaxAffineForm):
         model = fit_max_affine(
             form, normalized_inputs, normalized_outputs, key=jax.random.key(seed)
         )
         structure_cost = model.slopes.shape[1]
+    else:
+        model = fit_difference_max_affine(
+            form, normalized_inputs, normalized_outputs, key=jax.random.key(seed)
+        )
+        structure_cost = model.positive_slopes.shape[1] + model.negative_slopes.shape[1]
 
     surrogate = FittedSurrogate(
         input_reduction=input_reduction,
@@ -269,7 +278,7 @@ def fit(
 def fit_adaptive(
     target: Target,
     domain: Domain,
-    form: LinearForm | MaxAffineForm,
+    form: LinearForm | MaxAffineForm | DifferenceOfMaxAffineForm,
     *,
     initial_samples: int = 256,
     points_per_round: int = 32,

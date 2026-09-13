@@ -15,6 +15,8 @@ from surreax.forms import (
     LinearForm,
     MaxAffine,
     MaxAffineForm,
+    Network,
+    NetworkForm,
 )
 from surreax.reduction import active_subspace_inputs, pca_inputs, pca_outputs
 from surreax.report import ErrorReport
@@ -31,6 +33,8 @@ __all__ = [
     "LinearForm",
     "MaxAffine",
     "MaxAffineForm",
+    "Network",
+    "NetworkForm",
     "Target",
     "active_subspace_inputs",
     "box",

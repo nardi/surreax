@@ -24,6 +24,7 @@ from surreax.forms.difference_max_affine import (
     fit_difference_max_affine,
 )
 from surreax.forms.max_affine import MaxAffineForm, fit_max_affine
+from surreax.forms.network import NetworkForm, fit_network, parameter_count
 from surreax.forms.protocol import LinearForm
 from surreax.normalize import Normalizer
 from surreax.reduction import LinearReduction
@@ -120,7 +121,7 @@ def _error_report(
 def fit(
     target: Target,
     domain: Domain,
-    form: LinearForm | MaxAffineForm | DifferenceOfMaxAffineForm,
+    form: LinearForm | MaxAffineForm | DifferenceOfMaxAffineForm | NetworkForm,
     *,
     samples: int = 512,
     holdout: float = 0.2,
@@ -190,22 +191,27 @@ def fit(
     output_normalizer = normalize.from_moments(encoded_outputs)
     normalized_outputs = jax.vmap(output_normalizer.forward)(encoded_outputs)
 
+    # The target Jacobian in the model's coordinates supervises the derivative,
+    # shared by the linear Sobolev fit and the network fit.
+    target_jacobians = None
+    if derivative_weight > 0.0:
+        transform = functools.partial(
+            _normalized_target,
+            target=target,
+            domain=domain,
+            input_reduction=input_reduction,
+            input_normalizer=input_normalizer,
+            output_reduction=output_reduction,
+            output_normalizer=output_normalizer,
+        )
+        target_jacobians = jax.vmap(jax.jacobian(transform))(normalized_inputs)
+
     if isinstance(form, LinearForm):
         if sparse_terms is not None:
             model = fit_linear_sparse(
                 form, normalized_inputs, normalized_outputs, terms=sparse_terms, ridge=ridge
             )
-        elif derivative_weight > 0.0:
-            transform = functools.partial(
-                _normalized_target,
-                target=target,
-                domain=domain,
-                input_reduction=input_reduction,
-                input_normalizer=input_normalizer,
-                output_reduction=output_reduction,
-                output_normalizer=output_normalizer,
-            )
-            target_jacobians = jax.vmap(jax.jacobian(transform))(normalized_inputs)
+        elif target_jacobians is not None:
             model = fit_linear_sobolev(
                 form,
                 normalized_inputs,
@@ -223,11 +229,21 @@ def fit(
             form, normalized_inputs, normalized_outputs, key=jax.random.key(seed)
         )
         structure_cost = model.slopes.shape[1]
-    else:
+    elif isinstance(form, DifferenceOfMaxAffineForm):
         model = fit_difference_max_affine(
             form, normalized_inputs, normalized_outputs, key=jax.random.key(seed)
         )
         structure_cost = model.positive_slopes.shape[1] + model.negative_slopes.shape[1]
+    else:
+        model = fit_network(
+            form,
+            normalized_inputs,
+            normalized_outputs,
+            key=jax.random.key(seed),
+            jacobians=target_jacobians,
+            derivative_weight=derivative_weight,
+        )
+        structure_cost = parameter_count(model)
 
     surrogate = FittedSurrogate(
         input_reduction=input_reduction,
@@ -278,7 +294,7 @@ def fit(
 def fit_adaptive(
     target: Target,
     domain: Domain,
-    form: LinearForm | MaxAffineForm | DifferenceOfMaxAffineForm,
+    form: LinearForm | MaxAffineForm | DifferenceOfMaxAffineForm | NetworkForm,
     *,
     initial_samples: int = 256,
     points_per_round: int = 32,

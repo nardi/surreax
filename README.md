@@ -67,12 +67,12 @@ which leads to a few different choices:
 ## Status
 
 `surreax` fits explicit targets over a box, with the affine, Chebyshev
-polynomial, convex max-affine, and difference-of-max-affine forms. It can train
-against target derivatives, fit in a reduced space through PCA or an active
-subspace, select a sparse basis by matching pursuit, and add samples where the
-fit is worst. The report separates value, derivative, and projection error,
-searches the worst case over the domain, and gives the structure cost. Implicit
-targets and a neural form are planned.
+polynomial, convex max-affine, difference-of-max-affine, and feedforward network
+forms. It can train against target derivatives, fit in a reduced space through
+PCA or an active subspace, select a sparse basis by matching pursuit, and add
+samples where the fit is worst. The report separates value, derivative, and
+projection error, searches the worst case over the domain, and gives the
+structure cost. Implicit targets are planned.
 
 ## Development
 

@@ -14,6 +14,7 @@ from surreax.fitting import LinearModel
 from surreax.flatten import Unraveler, ravel
 from surreax.forms.difference_max_affine import DifferenceOfMaxAffine
 from surreax.forms.max_affine import MaxAffine
+from surreax.forms.network import Network
 from surreax.normalize import Normalizer
 from surreax.reduction import LinearReduction
 from surreax.report import ErrorReport
@@ -28,7 +29,7 @@ class FittedSurrogate(eqx.Module):
 
     input_reduction: LinearReduction
     input_normalizer: Normalizer
-    model: LinearModel | MaxAffine | DifferenceOfMaxAffine
+    model: LinearModel | MaxAffine | DifferenceOfMaxAffine | Network
     output_normalizer: Normalizer
     output_reduction: LinearReduction
     output_unravel: Unraveler = eqx.field(static=True)

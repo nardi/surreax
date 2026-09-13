@@ -134,3 +134,32 @@ surrogate = sx.fit(wave, domain, form, samples=400, worst_case_starts=0)
 assert float(surrogate.report.value_max) < 1e-2
 assert surrogate.report.structure_cost == 4
 ```
+
+## Network
+
+The network form is a feedforward multilayer perceptron with a smooth
+activation. It is not a structured form, so a solver cannot reason about it, but
+it is the accuracy reference that shows how much accuracy the structured forms
+cost, and the fallback when none of them fits well. It is not linear in its
+parameters, so it fits by gradient descent through optimistix. Its structure
+cost is the parameter count.
+
+Because the network holds an activation function as a leaf, jit it with
+`equinox.filter_jit` or a closure rather than passing it as a raw `jax.jit`
+argument.
+
+<!-- name: test_forms_network -->
+```python
+import jax.numpy as jnp
+import surreax as sx
+
+
+def smooth(x):
+    return (jnp.sin(2 * x[0]) + x[1] ** 2)[None]
+
+
+domain = sx.box([-1.0, -1.0], [1.0, 1.0])
+form = sx.NetworkForm(width=32, depth=2, steps=800)
+surrogate = sx.fit(smooth, domain, form, samples=256, worst_case_starts=0)
+assert float(surrogate.report.value_mean) < 0.02
+```

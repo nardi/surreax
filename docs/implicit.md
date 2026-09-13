@@ -71,3 +71,57 @@ assert float(surrogate.report.value_mean) < 0.5
 The residual the surrogate leaves is in `surrogate.report.value_mean`. A
 multi-solution residual needs the branch handling planned for a later version,
 so the current fit assumes a unique solution over the domain.
+
+## Iterative refinement
+
+The surrogate can keep the residual and polish each prediction with a few Newton
+steps, so a cheap solve from the surrogate's guess drives `g(x, f(x))` to zero at
+call time. Set `refinement_steps` to turn it on.
+
+<!-- name: test_implicit_refinement -->
+```python
+import jax.numpy as jnp
+import surreax as sx
+
+
+def residual(x, y):
+    return y**3 + y - x
+
+
+domain = sx.box([-2.0], [2.0])
+unknown_domain = sx.box([-1.2], [1.2])
+form = sx.ChebyshevPolynomial(degree=4)
+
+base = sx.fit_implicit(residual, domain, unknown_domain, form, samples=512, newton_steps=2)
+refined = sx.fit_implicit(
+    residual, domain, unknown_domain, form, samples=512, newton_steps=2, refinement_steps=3
+)
+assert float(refined.report.value_mean) < float(base.report.value_mean)
+```
+
+## The objective route
+
+There is also an experimental route that never inverts anything. It fits `f`
+directly by minimizing the residual it leaves, `mean ||g(x, f(x))||^2`. This
+suits a residual whose solve is expensive, but the objective is indifferent
+between solution branches, so it can converge to a biased mixture where the
+residual has several solutions. Prefer `fit_implicit` unless the solve is the
+bottleneck.
+
+<!-- name: test_implicit_objective -->
+```python
+import jax.numpy as jnp
+import surreax as sx
+
+
+def residual(x, y):
+    return y**3 + y - x
+
+
+domain = sx.box([-2.0], [2.0])
+form = sx.ChebyshevPolynomial(degree=4)
+surrogate = sx.fit_implicit_objective(
+    residual, domain, form, unknown_dimension=1, samples=256, steps=600
+)
+assert float(surrogate.report.value_mean) < 0.15
+```

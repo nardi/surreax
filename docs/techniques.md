@@ -156,3 +156,52 @@ adaptive = sx.fit_adaptive(
 fixed = sx.fit(bump, domain, form, samples=256, worst_case_steps=120)
 assert float(adaptive.report.worst_case) < float(fixed.report.worst_case)
 ```
+
+## Structural pruning
+
+The Jacobian says which inputs each output depends on. An input that no output
+depends on can be dropped, which is exact rather than statistical. `prune_inputs`
+is an input reducer that does this, and it fits into `reduce_inputs` like the PCA
+and active-subspace reducers.
+
+<!-- name: test_techniques_pruning -->
+```python
+import jax.numpy as jnp
+import surreax as sx
+
+
+def target(x):
+    # Depends on two of its five inputs.
+    return (2 * x[0] - x[3] ** 2)[None]
+
+
+domain = sx.box([-1.0] * 5, [1.0] * 5)
+surrogate = sx.fit(
+    target,
+    domain,
+    sx.ChebyshevPolynomial(degree=2),
+    samples=256,
+    reduce_inputs=sx.prune_inputs(),
+    worst_case_starts=0,
+)
+assert surrogate.input_reduction.encode_matrix.shape == (2, 5)
+assert float(surrogate.report.value_max) < 1e-3
+```
+
+`analyze` returns the same reading as a report: the coupling matrix and the
+block labels that split outputs and inputs into independent groups, so a
+separable target reads as separate blocks.
+
+<!-- name: test_techniques_analyze -->
+```python
+import jax.numpy as jnp
+import surreax as sx
+
+
+def separable(x):
+    return jnp.array([x[0] + x[1], x[2] * x[3]])
+
+
+structure = sx.analyze(separable, sx.box([-1.0] * 4, [1.0] * 4), samples=128)
+assert structure.input_block[0] != structure.input_block[2]
+```

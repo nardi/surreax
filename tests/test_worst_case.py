@@ -36,6 +36,25 @@ def test_worst_case_search_can_be_disabled() -> None:
     assert float(surrogate.report.worst_case) == 0.0
 
 
+def test_worst_case_fills_random_starts_beyond_the_seeds() -> None:
+    def target(x: jax.Array) -> jax.Array:
+        return (jnp.sin(3 * x[0]) * jnp.cos(3 * x[1]))[None]
+
+    domain = sx.box([-1.0, -1.0], [1.0, 1.0])
+    # More starts than held-out seed points, so the search fills the rest at random.
+    surrogate = sx.fit(
+        target,
+        domain,
+        sx.ChebyshevPolynomial(degree=2),
+        samples=32,
+        holdout=0.1,
+        worst_case_starts=12,
+        seed=0,
+    )
+    assert jnp.isfinite(surrogate.report.worst_case)
+    assert float(surrogate.report.worst_case) >= float(surrogate.report.value_max) - 1e-5
+
+
 def test_worst_case_point_lies_in_the_domain() -> None:
     def target(x: jax.Array) -> jax.Array:
         return (jnp.sin(3 * x[0]) * jnp.cos(3 * x[1]))[None]

@@ -32,13 +32,16 @@ def worst_case(
     steps: int,
     learning_rate: float,
     key: PRNGKeyArray,
+    seed_points: Float[Array, "p d"],
 ) -> tuple[Float[Array, ""], Float[Array, " d"]]:
     """Find the largest surrogate error over the domain and where it occurs.
 
-    Returns the error and the flat input that attains it, searched from `starts`
-    random points.
+    Returns the error and the flat input that attains it. The search starts from
+    the highest-error points among `seed_points`, so it begins near a known-bad
+    region, and fills any remaining starts at random.
     """
     lower, upper = domain.bounds()
+    width = upper - lower
 
     def squared_error(point):
         predicted = ravel(surrogate(domain.unravel(point)))
@@ -48,7 +51,12 @@ def worst_case(
         return jnp.sum((predicted - actual) ** 2)
 
     def point_of(unbounded):
-        return lower + (upper - lower) * jax.nn.sigmoid(unbounded)
+        return lower + width * jax.nn.sigmoid(unbounded)
+
+    def unbounded_of(point):
+        # Invert the sigmoid, clipped off the ends so a boundary point is finite.
+        fraction = jnp.clip((point - lower) / width, 1e-4, 1 - 1e-4)
+        return jnp.log(fraction / (1 - fraction))
 
     def negative_error(unbounded, _):
         return -squared_error(point_of(unbounded))
@@ -60,7 +68,14 @@ def worst_case(
         point = point_of(found.value)
         return jnp.sqrt(squared_error(point)), point
 
-    starts_unbounded = jax.random.normal(key, (starts, lower.shape[0]))
+    # Rank the seed points by error and warm-start from the worst of them.
+    seed_errors = jax.vmap(squared_error)(seed_points)
+    warmest = jnp.argsort(-seed_errors)[: min(starts, seed_points.shape[0])]
+    warm_starts = jax.vmap(unbounded_of)(seed_points[warmest])
+    random_count = max(0, starts - warmest.shape[0])
+    random_starts = jax.random.normal(key, (random_count, lower.shape[0]))
+    starts_unbounded = jnp.concatenate([warm_starts, random_starts])
+
     errors, points = jax.vmap(climb)(starts_unbounded)
     best = jnp.argmax(errors)
     return errors[best], points[best]

@@ -244,6 +244,7 @@ def fit(
             steps=worst_case_steps,
             learning_rate=worst_case_rate,
             key=jax.random.key(seed + 1),
+            seed_points=holdout_inputs,
         )
     else:
         worst_case_value = jnp.asarray(0.0)

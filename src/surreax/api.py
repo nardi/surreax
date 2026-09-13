@@ -206,44 +206,47 @@ def fit(
         )
         target_jacobians = jax.vmap(jax.jacobian(transform))(normalized_inputs)
 
-    if isinstance(form, LinearForm):
-        if sparse_terms is not None:
-            model = fit_linear_sparse(
-                form, normalized_inputs, normalized_outputs, terms=sparse_terms, ridge=ridge
+    match form:
+        case LinearForm():
+            if sparse_terms is not None:
+                model = fit_linear_sparse(
+                    form, normalized_inputs, normalized_outputs, terms=sparse_terms, ridge=ridge
+                )
+            elif target_jacobians is not None:
+                model = fit_linear_sobolev(
+                    form,
+                    normalized_inputs,
+                    normalized_outputs,
+                    target_jacobians,
+                    ridge=ridge,
+                    derivative_weight=derivative_weight,
+                )
+            else:
+                model = fit_linear(form, normalized_inputs, normalized_outputs, ridge=ridge)
+            # Count the basis terms the fit actually uses, which the sparse fit trims.
+            structure_cost = int(jnp.sum(jnp.any(model.weights != 0, axis=0)))
+        case MaxAffineForm():
+            model = fit_max_affine(
+                form, normalized_inputs, normalized_outputs, key=jax.random.key(seed)
             )
-        elif target_jacobians is not None:
-            model = fit_linear_sobolev(
+            structure_cost = model.slopes.shape[1]
+        case DifferenceOfMaxAffineForm():
+            model = fit_difference_max_affine(
+                form, normalized_inputs, normalized_outputs, key=jax.random.key(seed)
+            )
+            structure_cost = model.positive_slopes.shape[1] + model.negative_slopes.shape[1]
+        case NetworkForm():
+            model = fit_network(
                 form,
                 normalized_inputs,
                 normalized_outputs,
-                target_jacobians,
-                ridge=ridge,
+                key=jax.random.key(seed),
+                jacobians=target_jacobians,
                 derivative_weight=derivative_weight,
             )
-        else:
-            model = fit_linear(form, normalized_inputs, normalized_outputs, ridge=ridge)
-        # Count the basis terms the fit actually uses, which the sparse fit trims.
-        structure_cost = int(jnp.sum(jnp.any(model.weights != 0, axis=0)))
-    elif isinstance(form, MaxAffineForm):
-        model = fit_max_affine(
-            form, normalized_inputs, normalized_outputs, key=jax.random.key(seed)
-        )
-        structure_cost = model.slopes.shape[1]
-    elif isinstance(form, DifferenceOfMaxAffineForm):
-        model = fit_difference_max_affine(
-            form, normalized_inputs, normalized_outputs, key=jax.random.key(seed)
-        )
-        structure_cost = model.positive_slopes.shape[1] + model.negative_slopes.shape[1]
-    else:
-        model = fit_network(
-            form,
-            normalized_inputs,
-            normalized_outputs,
-            key=jax.random.key(seed),
-            jacobians=target_jacobians,
-            derivative_weight=derivative_weight,
-        )
-        structure_cost = parameter_count(model)
+            structure_cost = parameter_count(model)
+        case _:
+            raise TypeError(f"unsupported form: {type(form).__name__}")
 
     surrogate = FittedSurrogate(
         input_reduction=input_reduction,

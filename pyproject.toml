@@ -61,6 +61,7 @@ show_missing = true
 exclude_also = [
     "^\\s*\\.\\.\\.\\s*$",
     "if TYPE_CHECKING:",
+    "^\\s*case _:$",
 ]
 
 [tool.ty.environment]

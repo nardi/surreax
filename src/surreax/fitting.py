@@ -15,6 +15,12 @@ Derivative supervision, or Sobolev training, matches target Jacobians as well
 as target values. Because a form linear in its parameters has a Jacobian that
 is also linear in the weights, the derivative equations stack under the value
 equations and the same closed-form solve applies.
+
+A sparse fit keeps only the basis terms that matter, which controls the
+combinatorial growth of a total-degree basis and lowers the structure cost.
+Orthogonal matching pursuit does this greedily: at each step it adds the term
+most correlated with the residual, refits the active terms, and continues to a
+budget.
 """
 
 import equinox as eqx
@@ -96,3 +102,38 @@ def fit_linear_sobolev(
     stacked_design = jnp.concatenate([design, weight * derivative_design])
     stacked_targets = jnp.concatenate([targets, weight * derivative_targets])
     return LinearModel(weights=_ridge_lstsq(stacked_design, stacked_targets, ridge), form=form)
+
+
+def fit_linear_sparse(
+    form: LinearForm,
+    inputs: Float[Array, "n d"],
+    targets: Float[Array, "n k"],
+    *,
+    terms: int,
+    ridge: float,
+) -> LinearModel:
+    """Fit keeping only `terms` basis functions, chosen by matching pursuit.
+
+    One shared active set serves every output. Each step adds the feature with
+    the largest total correlation with the residual across outputs, refits the
+    active columns, and updates the residual.
+    """
+    design = jax.vmap(form.features)(inputs)
+    feature_count = design.shape[1]
+    output_count = targets.shape[1]
+    budget = min(terms, feature_count)
+
+    residual = targets
+    active: list[int] = []
+    coefficients = jnp.zeros((output_count, 0))
+    for _ in range(budget):
+        scores = jnp.sum(jnp.abs(design.T @ residual), axis=1)
+        scores = scores.at[jnp.array(active, dtype=int)].set(-jnp.inf)
+        active.append(int(jnp.argmax(scores)))
+        columns = design[:, jnp.array(active)]
+        coefficients = _ridge_lstsq(columns, targets, ridge)
+        residual = targets - columns @ coefficients.T
+
+    weights = jnp.zeros((output_count, feature_count), dtype=design.dtype)
+    weights = weights.at[:, jnp.array(active)].set(coefficients)
+    return LinearModel(weights=weights, form=form)

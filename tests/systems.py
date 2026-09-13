@@ -82,3 +82,16 @@ def rlc_domain() -> sx.Box:
         resistance=_scalar(2.0), inductance=_scalar(2.0), capacitance=_scalar(2.0)
     )
     return sx.Box(lower=lower, upper=upper)
+
+
+HIGH_DIMENSION = 12
+
+
+def few_active_inputs(x: Float[Array, " 12"]) -> Float[Array, " 1"]:
+    """A high-dimensional target that depends on only two of its inputs."""
+    return (x[2] ** 2 + 1.5 * x[7] - x[2] * x[7])[None]
+
+
+def high_dimensional_domain() -> sx.Box:
+    """A box over many inputs, most of which the target ignores."""
+    return sx.box([-1.0] * HIGH_DIMENSION, [1.0] * HIGH_DIMENSION)

@@ -16,7 +16,7 @@ from jaxtyping import Array, Float, PyTree
 from surreax import normalize, reduction, sampling
 from surreax.domain import Domain
 from surreax.fitted import FittedSurrogate
-from surreax.fitting import fit_linear, fit_linear_sobolev
+from surreax.fitting import fit_linear, fit_linear_sobolev, fit_linear_sparse
 from surreax.flatten import Unraveler, ravel, ravel_example
 from surreax.forms.max_affine import MaxAffineForm, fit_max_affine
 from surreax.forms.protocol import LinearForm
@@ -116,6 +116,7 @@ def fit(
     holdout: float = 0.2,
     ridge: float = 1e-8,
     derivative_weight: float = 0.0,
+    sparse_terms: int | None = None,
     reduce_inputs: reduction.InputReducer | None = None,
     reduce_outputs: reduction.OutputReducer | None = None,
     seed: int = 0,
@@ -125,8 +126,10 @@ def fit(
     Samples the domain with a low-discrepancy sequence, holds out a fraction for
     the error report, and fits the form by one regularized linear solve. A
     positive `derivative_weight` turns on Sobolev training, which fits against
-    the target Jacobian alongside its values. A `reduce_inputs` or
-    `reduce_outputs` builder fits the model in a smaller space.
+    the target Jacobian alongside its values. A `sparse_terms` budget fits a
+    linear form by matching pursuit, keeping only that many basis terms. A
+    `reduce_inputs` or `reduce_outputs` builder fits the model in a smaller
+    space.
     """
     inputs = sampling.sample(domain, samples, seed=seed)
     holdout_count = max(1, round(samples * holdout))
@@ -170,7 +173,11 @@ def fit(
     normalized_outputs = jax.vmap(output_normalizer.forward)(encoded_outputs)
 
     if isinstance(form, LinearForm):
-        if derivative_weight > 0.0:
+        if sparse_terms is not None:
+            model = fit_linear_sparse(
+                form, normalized_inputs, normalized_outputs, terms=sparse_terms, ridge=ridge
+            )
+        elif derivative_weight > 0.0:
             transform = functools.partial(
                 _normalized_target,
                 target=target,
@@ -191,7 +198,8 @@ def fit(
             )
         else:
             model = fit_linear(form, normalized_inputs, normalized_outputs, ridge=ridge)
-        structure_cost = model.weights.shape[1]
+        # Count the basis terms the fit actually uses, which the sparse fit trims.
+        structure_cost = int(jnp.sum(jnp.any(model.weights != 0, axis=0)))
     else:
         model = fit_max_affine(
             form, normalized_inputs, normalized_outputs, key=jax.random.key(seed)

@@ -62,6 +62,7 @@ def _flatten_batch(trees: PyTree[Array]) -> Float[Array, "n k"]:
     return jax.vmap(ravel)(trees)
 
 
+@eqx.filter_jit
 def _error_report(
     surrogate: FittedSurrogate,
     target: Target,

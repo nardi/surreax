@@ -13,6 +13,7 @@ the negative error.
 
 from collections.abc import Callable
 
+import equinox as eqx
 import jax
 import jax.numpy as jnp
 import optax
@@ -23,6 +24,7 @@ from surreax.domain import Domain
 from surreax.flatten import ravel
 
 
+@eqx.filter_jit
 def worst_case(
     surrogate: Callable[[PyTree[Array]], PyTree[Array]],
     target: Callable[[PyTree[Array]], PyTree[Array]],

@@ -66,3 +66,38 @@ assert float(surrogate.report.value_max) < 1e-3
 
 Raising the degree lowers the error on a smooth target, at the cost of more
 parameters. The report is how you watch that trade-off.
+
+## Max-affine
+
+The max-affine form is the maximum of several affine functions. It is convex
+and piecewise linear, so a downstream solver can minimize it as a linear
+program, which is why it is the recommended structured form.
+
+The maximum makes the form nonlinear in its parameters, so there is no
+closed-form fit. `surreax` fits it by alternating minimization, which assigns
+each sample to the piece that attains the maximum and refits each piece by
+least squares, in the manner of k-means, from several random restarts. The
+method is from Magnani and Boyd, [Convex piecewise-linear
+fitting](https://web.stanford.edu/~boyd/papers/pdf/cvx_pwl_fit.pdf),
+Optimization and Engineering 10(1), 2009. A gradient route, from [Max-Affine
+Regression via First-Order Methods](https://arxiv.org/abs/2308.06276), is
+available with `method="gradient"`.
+
+You choose the number of pieces. The report gives the structure cost, the piece
+count, which sets how expensive the surrogate is to reason about later.
+
+<!-- name: test_forms_max_affine -->
+```python
+import jax.numpy as jnp
+import surreax as sx
+
+
+def convex(x):
+    return jnp.maximum(2 * x[0] - x[1], x[0] + 2 * x[1])[None]
+
+
+domain = sx.box([-1.0, -1.0], [1.0, 1.0])
+surrogate = sx.fit(convex, domain, sx.MaxAffineForm(pieces=2), samples=256)
+assert float(surrogate.report.value_max) < 1e-2
+assert surrogate.report.structure_cost == 2
+```

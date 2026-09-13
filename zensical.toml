@@ -10,6 +10,7 @@ nav = [
   { "Introduction" = "index.md" },
   { "Getting started" = "getting-started.md" },
   { "Model forms" = "forms.md" },
+  { "Fitting techniques" = "techniques.md" },
   { "Development" = "development.md" },
 ]
 

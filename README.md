@@ -66,10 +66,12 @@ which leads to a few different choices:
 
 ## Status
 
-The first version fits explicit targets over a box, with the affine and
-Chebyshev polynomial forms, and reports held-out value and derivative error.
-Piecewise linear forms, dimension reduction, derivative supervision, and
-implicit targets are planned.
+`surreax` fits explicit targets over a box, with the affine, Chebyshev
+polynomial, and convex max-affine forms. It can train against target
+derivatives, fit in a reduced space through PCA or an active subspace, and
+select a sparse basis by matching pursuit. The report separates value,
+derivative, and projection error and gives the structure cost. Implicit targets
+and further forms are planned.
 
 ## Development
 

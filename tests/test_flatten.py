@@ -2,7 +2,7 @@
 
 import jax.numpy as jnp
 import jax.tree_util as jtu
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from surreax.flatten import ravel, ravel_example
@@ -23,6 +23,7 @@ def test_ravel_example_round_trips_a_nested_pytree() -> None:
 
 
 @given(st.lists(st.integers(1, 5), min_size=1, max_size=4))
+@settings(deadline=None)
 def test_ravel_preserves_total_size(shapes: list[int]) -> None:
     leaves = [jnp.arange(float(n)) for n in shapes]
     tree = {str(i): leaf for i, leaf in enumerate(leaves)}

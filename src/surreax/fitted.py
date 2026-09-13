@@ -7,7 +7,7 @@ the error report alongside its parameters.
 """
 
 import equinox as eqx
-from jaxtyping import Array, Float, PyTree
+from jaxtyping import Array, PyTree
 
 from surreax.domain import Domain
 from surreax.fitting import LinearModel
@@ -33,7 +33,7 @@ class FittedSurrogate(eqx.Module):
     domain: Domain
     report: ErrorReport
 
-    def __call__(self, x: Float[Array, " d"]) -> PyTree[Array]:
+    def __call__(self, x: PyTree[Array]) -> PyTree[Array]:
         encoded = self.input_reduction.forward(ravel(x))
         normalized = self.input_normalizer.forward(encoded)
         predicted = self.model(normalized)

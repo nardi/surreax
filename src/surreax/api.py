@@ -16,12 +16,12 @@ from surreax import normalize, reduction, sampling
 from surreax.domain import Domain
 from surreax.fitted import FittedSurrogate
 from surreax.fitting import fit_linear
-from surreax.flatten import ravel, ravel_example
+from surreax.flatten import Unraveler, ravel, ravel_example
 from surreax.forms.protocol import LinearForm
 from surreax.report import ErrorReport
 
-Target = Callable[[Float[Array, " d"]], PyTree[Array]]
-"""A pure JAX function from one flat input to a pytree of outputs."""
+Target = Callable[[PyTree[Array]], PyTree[Array]]
+"""A pure JAX function from one input pytree to a pytree of outputs."""
 
 
 def _flatten_batch(trees: PyTree[Array]) -> Float[Array, "n k"]:
@@ -30,18 +30,26 @@ def _flatten_batch(trees: PyTree[Array]) -> Float[Array, "n k"]:
 
 
 def _error_report(
-    surrogate: FittedSurrogate, target: Target, inputs: Float[Array, "n d"]
+    surrogate: FittedSurrogate,
+    target: Target,
+    inputs: Float[Array, "n d"],
+    unravel: Unraveler,
 ) -> ErrorReport:
-    """Measure value and derivative error against the target on held-out points."""
-    predicted = _flatten_batch(jax.vmap(surrogate)(inputs))
-    actual = _flatten_batch(jax.vmap(target)(inputs))
+    """Measure value and derivative error against the target on held-out points.
+
+    Both functions take a pytree input, so they are composed with `unravel` to
+    run in the flat input space the held-out points live in.
+    """
+
+    def flat_surrogate(point: Float[Array, " d"]) -> Float[Array, " k"]:
+        return ravel(surrogate(unravel(point)))
+
+    def flat_target(point: Float[Array, " d"]) -> Float[Array, " k"]:
+        return ravel(target(unravel(point)))
+
+    predicted = jax.vmap(flat_surrogate)(inputs)
+    actual = jax.vmap(flat_target)(inputs)
     value_residual = jnp.linalg.norm(predicted - actual, axis=1)
-
-    def flat_surrogate(x: Float[Array, " d"]) -> Float[Array, " k"]:
-        return ravel(surrogate(x))
-
-    def flat_target(x: Float[Array, " d"]) -> Float[Array, " k"]:
-        return ravel(target(x))
 
     surrogate_jacobian = jax.vmap(jax.jacobian(flat_surrogate))(inputs)
     target_jacobian = jax.vmap(jax.jacobian(flat_target))(inputs)
@@ -77,7 +85,10 @@ def fit(
     train_inputs = inputs[:-holdout_count]
     holdout_inputs = inputs[-holdout_count:]
 
-    train_outputs = jax.vmap(target)(train_inputs)
+    def evaluate(point: Float[Array, " d"]) -> PyTree[Array]:
+        return target(domain.unravel(point))
+
+    train_outputs = jax.vmap(evaluate)(train_inputs)
     _, output_unravel = ravel_example(jax.tree.map(lambda leaf: leaf[0], train_outputs))
     flat_outputs = _flatten_batch(train_outputs)
 
@@ -112,5 +123,5 @@ def fit(
             derivative_max=jnp.asarray(0.0),
         ),
     )
-    report = _error_report(surrogate, target, holdout_inputs)
+    report = _error_report(surrogate, target, holdout_inputs, domain.unravel)
     return eqx.tree_at(lambda s: s.report, surrogate, report)

@@ -111,3 +111,40 @@ def test_dataset_domain_fits_over_inferred_bounds() -> None:
 
     surrogate = sx.fit(target, domain, sx.Affine(), samples=128, seed=0)
     assert float(surrogate.report.value_max) < 1e-3
+
+
+def test_box_unravels_a_pytree_bound_round_trip() -> None:
+    domain = systems.oscillator_domain()
+    lower, _ = domain.bounds()
+    restored = domain.unravel(lower)
+    assert isinstance(restored, systems.OscillatorState)
+    assert jnp.allclose(restored.mass, 1.0)
+    assert jnp.allclose(restored.stiffness, 8.0)
+    assert jnp.allclose(restored.damping, 0.1)
+
+
+def test_pytree_input_surrogate_agrees_across_jit_vmap_and_derivatives() -> None:
+    domain = systems.oscillator_domain()
+    surrogate = sx.fit(
+        systems.oscillator_displacement,
+        domain,
+        sx.ChebyshevPolynomial(degree=4),
+        samples=256,
+        seed=0,
+    )
+    state = systems.OscillatorState(
+        mass=jnp.asarray(1.5), stiffness=jnp.asarray(10.0), damping=jnp.asarray(0.5)
+    )
+
+    plain = surrogate(state)
+    assert jnp.allclose(eqx.filter_jit(surrogate)(state), plain)
+
+    batch = jax.vmap(domain.unravel)(jnp.array([[1.2, 9.0, 0.3], [1.8, 11.0, 0.7]]))
+    batched = jax.vmap(surrogate)(batch)
+    assert batched.shape == (2, 1)
+
+    # Grad flows back into the pytree input, one cotangent per field.
+    gradient = jax.grad(lambda s: surrogate(s)[0])(state)
+    assert jnp.isfinite(gradient.mass)
+    assert jnp.isfinite(gradient.stiffness)
+    assert jnp.isfinite(gradient.damping)

@@ -72,7 +72,8 @@ forms. It can train against target derivatives, fit in a reduced space through
 PCA or an active subspace, select a sparse basis by matching pursuit, and add
 samples where the fit is worst. The report separates value, derivative, and
 projection error, searches the worst case over the domain, and gives the
-structure cost. Implicit targets are planned.
+structure cost. It also fits implicit targets given as a residual `g(x, y)`,
+through the inverse map, without solving `g = 0`.
 
 ## Development
 

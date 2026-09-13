@@ -39,10 +39,12 @@ class ChebyshevPolynomial(eqx.Module):
     degree: int = eqx.field(static=True)
 
     def features(self, x: Float[Array, " d"]) -> Float[Array, " f"]:
+        dimension = x.shape[0]
         table = _chebyshev_table(x, self.degree)
-        exponents = _exponents(x.shape[0], self.degree)
-        products = [
-            jnp.prod(jnp.stack([table[axis, power] for axis, power in enumerate(e)]))
-            for e in exponents
-        ]
-        return jnp.stack(products)
+        # Each row of `powers` is one basis term's exponent per coordinate. The
+        # gather picks that coordinate's Chebyshev value, and the product over
+        # coordinates is the basis function. Building the whole basis this way
+        # keeps the traced graph a few ops rather than one per term.
+        powers = jnp.asarray(_exponents(dimension, self.degree))
+        gathered = table[jnp.arange(dimension), powers]
+        return jnp.prod(gathered, axis=1)

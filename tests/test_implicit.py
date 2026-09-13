@@ -54,6 +54,17 @@ def test_nonlinear_monotone_reaches_a_low_residual() -> None:
     assert float(surrogate.report.value_mean) < 0.5
 
 
+def test_iterative_refinement_drives_the_residual_down() -> None:
+    domain = sx.box([-2.0], [2.0])
+    unknown_domain = sx.box([-1.2], [1.2])
+    form = sx.ChebyshevPolynomial(degree=4)
+    base = sx.fit_implicit(_cubic, domain, unknown_domain, form, samples=512, newton_steps=2)
+    refined = sx.fit_implicit(
+        _cubic, domain, unknown_domain, form, samples=512, newton_steps=2, refinement_steps=3
+    )
+    assert float(refined.report.value_mean) < float(base.report.value_mean) / 5
+
+
 def test_implicit_surrogate_survives_jit_vmap_and_grad() -> None:
     def residual(x: jax.Array, y: jax.Array) -> jax.Array:
         return y - 2.0 * x

@@ -106,15 +106,25 @@ class ImplicitSurrogate(eqx.Module):
     """A surrogate of an implicit target, the zero-residual slice of the inverse.
 
     Applies the fitted inverse map `h` at zero residual, so `f(x) = h(x, 0)`.
+    When a residual and a positive `refinement_steps` are kept, the call polishes
+    that prediction with Newton steps on the residual, driving `g(x, f(x))` toward
+    zero using the surrogate as the starting guess.
     """
 
     inverse_map: FittedSurrogate
     residual_dimension: int = eqx.field(static=True)
     report: ErrorReport
+    residual: "Residual | None" = eqx.field(static=True, default=None)
+    refinement_steps: int = eqx.field(static=True, default=0)
 
     def __call__(self, x: Float[Array, " n"]) -> Float[Array, " m"]:
         augmented = jnp.concatenate([x, jnp.zeros(self.residual_dimension)])
-        return self.inverse_map(augmented)
+        prediction = self.inverse_map(augmented)
+        if self.residual is None:
+            return prediction
+        for _ in range(self.refinement_steps):
+            prediction = _newton_step(self.residual, x, prediction)
+        return prediction
 
 
 def _newton_step(
@@ -140,6 +150,7 @@ def fit_implicit(
     holdout: float = 0.2,
     ridge: float = 1e-8,
     newton_steps: int = 1,
+    refinement_steps: int = 0,
     seed: int = 0,
 ) -> ImplicitSurrogate:
     """Fit a surrogate `f` with `residual(x, f(x))` near zero, without solving.
@@ -149,6 +160,10 @@ def fit_implicit(
     evaluates the residual forward, fits the inverse map over the augmented
     input, and returns its zero-residual slice. The report is the residual the
     surrogate leaves on held-out inputs.
+
+    A positive `refinement_steps` keeps the residual with the surrogate and
+    polishes each prediction with that many Newton steps, so a cheap solve from
+    the surrogate's guess drives the residual to zero at call time.
     """
     inputs = sampling.sample(domain, samples, seed=seed)
     unknowns = sampling.sample(unknown_domain, samples, seed=seed + 1)
@@ -162,6 +177,8 @@ def fit_implicit(
         inverse_map=inverse_map,
         residual_dimension=residuals.shape[1],
         report=_zero_report(inputs.shape[1]),
+        residual=residual if refinement_steps > 0 else None,
+        refinement_steps=refinement_steps,
     )
 
     holdout_count = max(1, round(samples * holdout))

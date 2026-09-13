@@ -8,6 +8,7 @@ from surreax.api import Target, fit
 from surreax.domain import Box, Domain, box, box_from_data
 from surreax.fitted import FittedSurrogate
 from surreax.forms import Affine, ChebyshevPolynomial, LinearForm
+from surreax.reduction import active_subspace_inputs, pca_inputs, pca_outputs
 from surreax.report import ErrorReport
 
 __all__ = [
@@ -19,7 +20,10 @@ __all__ = [
     "FittedSurrogate",
     "LinearForm",
     "Target",
+    "active_subspace_inputs",
     "box",
     "box_from_data",
     "fit",
+    "pca_inputs",
+    "pca_outputs",
 ]

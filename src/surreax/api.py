@@ -27,6 +27,13 @@ Target = Callable[[PyTree[Array]], PyTree[Array]]
 """A pure JAX function from one input pytree to a pytree of outputs."""
 
 
+def _flat_target(
+    point: Float[Array, " d"], *, target: Target, domain: Domain
+) -> Float[Array, " k"]:
+    """The target evaluated at a flat input, flattened to a vector."""
+    return ravel(target(domain.unravel(point)))
+
+
 def _normalized_target(
     point: Float[Array, " d"],
     *,
@@ -81,11 +88,19 @@ def _error_report(
     jacobian_residual = jnp.linalg.norm(
         (surrogate_jacobian - target_jacobian).reshape(sample_count, -1), axis=1
     )
+
+    def reconstruct(output: Float[Array, " k"]) -> Float[Array, " k"]:
+        reduction = surrogate.output_reduction
+        return reduction.inverse(reduction.forward(output))
+
+    projection_residual = jnp.linalg.norm(actual - jax.vmap(reconstruct)(actual), axis=1)
     return ErrorReport(
         value_mean=jnp.mean(value_residual),
         value_max=jnp.max(value_residual),
         derivative_mean=jnp.mean(jacobian_residual),
         derivative_max=jnp.max(jacobian_residual),
+        projection_mean=jnp.mean(projection_residual),
+        projection_max=jnp.max(projection_residual),
     )
 
 
@@ -98,6 +113,8 @@ def fit(
     holdout: float = 0.2,
     ridge: float = 1e-8,
     derivative_weight: float = 0.0,
+    reduce_inputs: reduction.InputReducer | None = None,
+    reduce_outputs: reduction.OutputReducer | None = None,
     seed: int = 0,
 ) -> FittedSurrogate:
     """Fit a surrogate of `form` to `target` over `domain`.
@@ -105,7 +122,8 @@ def fit(
     Samples the domain with a low-discrepancy sequence, holds out a fraction for
     the error report, and fits the form by one regularized linear solve. A
     positive `derivative_weight` turns on Sobolev training, which fits against
-    the target Jacobian alongside its values.
+    the target Jacobian alongside its values. A `reduce_inputs` or
+    `reduce_outputs` builder fits the model in a smaller space.
     """
     inputs = sampling.sample(domain, samples, seed=seed)
     holdout_count = max(1, round(samples * holdout))
@@ -121,12 +139,27 @@ def fit(
 
     input_dimension = inputs.shape[1]
     output_dimension = flat_outputs.shape[1]
-    input_reduction = reduction.identity(input_dimension)
-    output_reduction = reduction.identity(output_dimension)
 
-    lower, upper = domain.bounds()
-    input_normalizer = normalize.from_bounds(lower, upper)
+    if reduce_inputs is None:
+        input_reduction = reduction.identity(input_dimension)
+    else:
+        flat_target = functools.partial(_flat_target, target=target, domain=domain)
+        train_jacobians = jax.vmap(jax.jacobian(flat_target))(train_inputs)
+        input_reduction = reduce_inputs(train_inputs, train_jacobians)
+    output_reduction = (
+        reduction.identity(output_dimension)
+        if reduce_outputs is None
+        else reduce_outputs(flat_outputs)
+    )
+
     encoded_inputs = jax.vmap(input_reduction.forward)(train_inputs)
+    if reduce_inputs is None:
+        # An identity reduction keeps the domain box, so map it to [-1, 1].
+        lower, upper = domain.bounds()
+        input_normalizer = normalize.from_bounds(lower, upper)
+    else:
+        # A reduced space has no box, so center and whiten from the samples.
+        input_normalizer = normalize.from_moments(encoded_inputs)
     normalized_inputs = jax.vmap(input_normalizer.forward)(encoded_inputs)
 
     encoded_outputs = jax.vmap(output_reduction.forward)(flat_outputs)
@@ -168,6 +201,8 @@ def fit(
             value_max=jnp.asarray(0.0),
             derivative_mean=jnp.asarray(0.0),
             derivative_max=jnp.asarray(0.0),
+            projection_mean=jnp.asarray(0.0),
+            projection_max=jnp.asarray(0.0),
         ),
     )
     report = _error_report(surrogate, target, holdout_inputs, domain.unravel)

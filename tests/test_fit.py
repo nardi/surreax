@@ -136,6 +136,37 @@ def test_derivative_supervision_lowers_derivative_error() -> None:
     assert float(sobolev.report.derivative_max) < float(value_only.report.derivative_max)
 
 
+def test_output_reduction_fits_a_vector_target() -> None:
+    surrogate = sx.fit(
+        systems.rlc_response,
+        systems.rlc_domain(),
+        sx.ChebyshevPolynomial(degree=5),
+        samples=512,
+        reduce_outputs=sx.pca_outputs(rank=4),
+        seed=0,
+    )
+    assert surrogate.output_reduction.encode_matrix.shape == (4, 6)
+    assert float(surrogate.report.value_mean) < 0.1
+    assert jnp.isfinite(surrogate.report.projection_mean)
+
+
+def test_active_subspace_reduction_fits_a_ridge_target() -> None:
+    def ridge(x: jax.Array) -> jax.Array:
+        return (jnp.sin(x[0] + x[1] + x[2]))[None]
+
+    domain = sx.box([-1.0, -1.0, -1.0], [1.0, 1.0, 1.0])
+    surrogate = sx.fit(
+        ridge,
+        domain,
+        sx.ChebyshevPolynomial(degree=4),
+        samples=512,
+        reduce_inputs=sx.active_subspace_inputs(rank=1),
+        seed=0,
+    )
+    assert surrogate.input_reduction.encode_matrix.shape == (1, 3)
+    assert float(surrogate.report.value_mean) < 0.05
+
+
 def test_box_unravels_a_pytree_bound_round_trip() -> None:
     domain = systems.oscillator_domain()
     lower, _ = domain.bounds()

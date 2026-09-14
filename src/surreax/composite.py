@@ -14,6 +14,7 @@ and gathers its outputs without rebuilding anything, and it stays a pytree that
 """
 
 from collections.abc import Callable, Sequence
+from typing import cast
 
 import equinox as eqx
 import jax.numpy as jnp
@@ -98,7 +99,12 @@ def fit_separable(
     input_block = np.asarray(structure.input_block)
     output_block = np.asarray(structure.output_block)
     labels = np.unique(output_block)
-    block_forms = list(form) if isinstance(form, Sequence) else [form] * labels.shape[0]
+    # The runtime `Sequence` check drops the element type, so restore it.
+    block_forms = (
+        list(cast("Sequence[Form]", form))
+        if isinstance(form, Sequence)
+        else [form] * labels.shape[0]
+    )
     lower, upper = domain.bounds()
     lower_np, upper_np = np.asarray(lower), np.asarray(upper)
 

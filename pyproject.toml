@@ -14,6 +14,7 @@ dependencies = [
     "scipy>=1.13",
     "optimistix>=0.0.9",
     "optax>=0.2.3",
+    "lineax>=0.0.7",
 ]
 
 [project.urls]

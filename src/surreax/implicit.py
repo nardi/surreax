@@ -18,6 +18,7 @@ from collections.abc import Callable
 import equinox as eqx
 import jax
 import jax.numpy as jnp
+import lineax
 import numpy as np
 import optax
 import optimistix as optx
@@ -70,23 +71,31 @@ def fit_data(
     *,
     holdout: float = 0.2,
     ridge: float = 1e-8,
+    reduce_outputs: reduction.OutputReducer | None = None,
 ) -> FittedSurrogate:
     """Fit a linear form to given input-output pairs, with no target callable.
 
     Normalizes from sample moments, since the pairs carry no domain box, and
     reports the held-out prediction error. This is the array counterpart of
-    `fit`, used where the data is pairs rather than a callable.
+    `fit`, used where the data is pairs rather than a callable. A `reduce_outputs`
+    builder fits the map into a reduced output space, so a large output collapses
+    to a handful of coefficients before the fit.
     """
     holdout_count = max(1, round(inputs.shape[0] * holdout))
     train_inputs, holdout_inputs = inputs[:-holdout_count], inputs[-holdout_count:]
     train_outputs, holdout_outputs = outputs[:-holdout_count], outputs[-holdout_count:]
 
     input_reduction = reduction.identity(inputs.shape[1])
-    output_reduction = reduction.identity(outputs.shape[1])
+    output_reduction = (
+        reduction.identity(outputs.shape[1])
+        if reduce_outputs is None
+        else reduce_outputs(train_outputs)
+    )
     input_normalizer = normalize.from_moments(train_inputs)
-    output_normalizer = normalize.from_moments(train_outputs)
+    encoded_outputs = jax.vmap(output_reduction.forward)(train_outputs)
+    output_normalizer = normalize.from_moments(encoded_outputs)
     normalized_inputs = jax.vmap(input_normalizer.forward)(train_inputs)
-    normalized_outputs = jax.vmap(output_normalizer.forward)(train_outputs)
+    normalized_outputs = jax.vmap(output_normalizer.forward)(encoded_outputs)
     model = fit_linear(form, normalized_inputs, normalized_outputs, ridge=ridge)
     _, output_unravel = ravel_example(train_outputs[0])
 
@@ -114,6 +123,27 @@ def _newton_step(
     """One Newton step in the unknown, `y - (dg/dy)^{-1} g(x, y)`."""
     jacobian = jax.jacobian(lambda unknown: residual(x, unknown))(y)
     return y - jnp.linalg.solve(jacobian, residual(x, y))
+
+
+def _newton_step_matrix_free(
+    residual: Residual, x: Float[Array, " n"], y: Float[Array, " m"]
+) -> Float[Array, " m"]:
+    """One Newton step that solves the Jacobian system without forming it.
+
+    The step needs `(dg/dy)^{-1} g`, which lineax finds by GMRES from the
+    Jacobian-vector product alone, so a large unknown never pays for a dense
+    `m` by `m` Jacobian. This is the scalable route for a big, sparse system.
+    """
+    residual_value = residual(x, y)
+
+    def jacobian_vector(direction: Float[Array, " m"]) -> Float[Array, " m"]:
+        return jax.jvp(lambda unknown: residual(x, unknown), (y,), (direction,))[1]
+
+    operator = lineax.FunctionLinearOperator(
+        jacobian_vector, jax.ShapeDtypeStruct(y.shape, y.dtype)
+    )
+    step = lineax.linear_solve(operator, residual_value, solver=lineax.GMRES(rtol=1e-6, atol=1e-6))
+    return y - step.value
 
 
 class FoldReport(eqx.Module):
@@ -226,10 +256,7 @@ def _solve_independently(
     newton_steps: int,
 ) -> Float[Array, "n m"]:
     """Newton-solve every sample from its own start, in parallel."""
-    unknowns = starts
-    for _ in range(newton_steps):
-        unknowns = jax.vmap(lambda x, y: _newton_step(residual, x, y))(inputs, unknowns)
-    return unknowns
+    return _solve_independently_with(_newton_step, residual, inputs, starts, newton_steps)
 
 
 def _solve_by_continuation(
@@ -268,6 +295,60 @@ def _branch_mask(
     anchor_sign = jnp.sign(determinants[jnp.argmax(jnp.abs(determinants))])
     keep = determinants * anchor_sign > 0
     return keep, jnp.mean(~keep)
+
+
+class ReducedSolve(eqx.Module):
+    """Fit a large-unknown target by solving the residual then reducing the output.
+
+    Suits a system where the input is small but the unknown is large. It solves
+    `g = 0` for the unknown at each sample, collapses the solved unknowns onto
+    their leading principal directions, and fits the map into that reduced space,
+    so the surrogate predicts a handful of coefficients rather than the full
+    unknown. The solve is matrix-free through lineax by default, so it never forms
+    the dense Jacobian, which is what lets it reach a large unknown.
+    """
+
+    form: LinearForm
+    unknown_domain: Domain
+    rank: int | None = eqx.field(static=True, default=None)
+    variance: float = eqx.field(static=True, default=0.99)
+    newton_steps: int = eqx.field(static=True, default=8)
+    matrix_free: bool = eqx.field(static=True, default=True)
+
+
+def _fit_reduced_solve(
+    residual: Residual,
+    inputs: Float[Array, "n d"],
+    method: ReducedSolve,
+    holdout: float,
+    ridge: float,
+) -> FittedSurrogate:
+    """Solve the residual for every sample, then fit the reduced output map."""
+    starts = sampling.sample(method.unknown_domain, inputs.shape[0], seed=0)
+    step = _newton_step_matrix_free if method.matrix_free else _newton_step
+    unknowns = _solve_independently_with(step, residual, inputs, starts, method.newton_steps)
+    return fit_data(
+        inputs,
+        unknowns,
+        method.form,
+        holdout=holdout,
+        ridge=ridge,
+        reduce_outputs=reduction.pca_outputs(rank=method.rank, variance=method.variance),
+    )
+
+
+def _solve_independently_with(
+    step: Callable[[Residual, Float[Array, " n"], Float[Array, " m"]], Float[Array, " m"]],
+    residual: Residual,
+    inputs: Float[Array, "n d"],
+    starts: Float[Array, "n m"],
+    newton_steps: int,
+) -> Float[Array, "n m"]:
+    """Iterate a Newton step over every sample from its own start, in parallel."""
+    unknowns = starts
+    for _ in range(newton_steps):
+        unknowns = jax.vmap(lambda x, y: step(residual, x, y))(inputs, unknowns)
+    return unknowns
 
 
 def _fit_inverse_map(
@@ -355,7 +436,7 @@ def _fit_objective(
 def fit_implicit(
     residual: Residual,
     domain: Domain,
-    method: InverseMap | Objective,
+    method: InverseMap | Objective | ReducedSolve,
     *,
     samples: int = 512,
     holdout: float = 0.2,
@@ -368,7 +449,7 @@ def fit_implicit(
     Samples the domain, builds the surrogate through the strategy `method`, and
     reports the residual the surrogate leaves on held-out inputs. A positive
     `refine_steps` polishes each prediction with Newton steps on the residual at
-    call time, which both the inverse-map and objective results can use.
+    call time, which every method's result can use.
     """
     inputs = sampling.sample(domain, samples, seed=seed)
     holdout_count = max(1, round(samples * holdout))
@@ -381,6 +462,8 @@ def fit_implicit(
             )
         case Objective():
             base = _fit_objective(residual, domain, train_inputs, method)
+        case ReducedSolve():
+            base = _fit_reduced_solve(residual, train_inputs, method, holdout, ridge)
         case _:
             raise TypeError(f"unsupported implicit method: {type(method).__name__}")
 

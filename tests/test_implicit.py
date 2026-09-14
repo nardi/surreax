@@ -4,6 +4,7 @@ import jax
 import jax.numpy as jnp
 
 import surreax as sx
+from surreax.implicit import _newton_step, _newton_step_matrix_free, _solve_independently
 
 
 def test_affine_in_the_unknown_is_recovered_exactly() -> None:
@@ -158,6 +159,63 @@ def test_root_find_and_refine_solve_a_scalar_root() -> None:
     # refine wraps an existing surrogate the same way.
     polished = sx.refine(lambda x: x / 2.0, residual, steps=8)
     assert jnp.allclose(polished(point), guess(point))
+
+
+_GRID = jnp.linspace(0.0, 1.0, 64)
+_SHAPES = jnp.stack(
+    [jnp.sin(jnp.pi * _GRID), jnp.sin(2 * jnp.pi * _GRID), _GRID * (1 - _GRID)]
+)
+
+
+def _diffusion(x: jax.Array, y: jax.Array) -> jax.Array:
+    # A large sparse system: the nearest-neighbor Laplacian couples the unknown,
+    # driven by three smooth spatial shapes, so the solution lives on a rank-3
+    # manifold in the 64-dimensional unknown space.
+    laplacian = -2.0 * y + jnp.roll(y, 1) + jnp.roll(y, -1)
+    return -laplacian + 0.5 * y - x @ _SHAPES
+
+
+def test_reduced_solve_fits_a_large_sparse_system() -> None:
+    domain = sx.box([-1.0, -1.0, -1.0], [1.0, 1.0, 1.0])
+    method = sx.ReducedSolve(
+        form=sx.Affine(), unknown_domain=sx.box([-3.0] * 64, [3.0] * 64), rank=3, newton_steps=5
+    )
+    surrogate = sx.fit_implicit(_diffusion, domain, method, samples=128)
+    # The 64 unknowns collapse to 3 coefficients, and the fit stays exact.
+    assert surrogate.output_reduction.encode_matrix.shape[0] == 3
+    assert float(surrogate.report.value_mean) < 1e-3
+
+    points = jax.random.uniform(jax.random.key(7), (20, 3), minval=-1.0, maxval=1.0)
+    true = _solve_independently(_diffusion, points, jnp.zeros((20, 64)), 5)
+    reconstruction = jnp.mean(jnp.linalg.norm(jax.vmap(surrogate)(points) - true, axis=1))
+    assert float(reconstruction) < 1e-3
+
+
+def test_matrix_free_solve_matches_the_dense_solve() -> None:
+    x = jnp.array([0.5, -0.3, 0.7])
+    dense, matrix_free = jnp.zeros(64), jnp.zeros(64)
+    for _ in range(5):
+        dense = _newton_step(_diffusion, x, dense)
+        matrix_free = _newton_step_matrix_free(_diffusion, x, matrix_free)
+    assert jnp.allclose(dense, matrix_free, atol=1e-5)
+
+
+def test_reduced_solve_dense_route_agrees_with_matrix_free() -> None:
+    domain = sx.box([-1.0, -1.0, -1.0], [1.0, 1.0, 1.0])
+    unknown_domain = sx.box([-3.0] * 64, [3.0] * 64)
+    dense = sx.fit_implicit(
+        _diffusion,
+        domain,
+        sx.ReducedSolve(
+            form=sx.Affine(),
+            unknown_domain=unknown_domain,
+            rank=3,
+            newton_steps=5,
+            matrix_free=False,
+        ),
+        samples=128,
+    )
+    assert float(dense.report.value_mean) < 1e-3
 
 
 def test_implicit_surrogate_survives_jit_vmap_and_grad() -> None:

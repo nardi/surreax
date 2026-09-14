@@ -190,6 +190,51 @@ surrogate = sx.fit_data(inputs, outputs, sx.Affine())
 assert float(surrogate.report.value_max) < 1e-3
 ```
 
+## Large sparse systems
+
+When the input is small but the unknown is large, a physical model discretized
+over many states, the `ReducedSolve` method fits `f` at a scale the inverse map
+cannot reach. It rests on two facts. The residual Jacobian in the unknown is
+sparse, so the Newton solve is cheap when the sparsity is used, and `f` maps a
+small input to a large unknown, so the solved unknowns trace a manifold no wider
+than the input. `ReducedSolve` solves `g = 0` at each sample, collapses the
+solved unknowns onto their leading principal directions, and fits the map into
+that small reduced space.
+
+The solve is matrix-free through lineax by default, so it never forms the dense
+Jacobian. lineax finds the Newton step by GMRES from the Jacobian-vector product
+alone, which is what keeps a large unknown tractable. See Rackauckas and
+colleagues on [lineax](https://arxiv.org/abs/2311.17283).
+
+Here the unknown is a field of 64 states coupled by a nearest-neighbor
+Laplacian, driven by three inputs, so the solution lives on a rank-3 manifold.
+
+<!-- name: test_implicit_reduced_solve -->
+```python
+import jax
+import jax.numpy as jnp
+import surreax as sx
+
+grid = jnp.linspace(0.0, 1.0, 64)
+shapes = jnp.stack([jnp.sin(jnp.pi * grid), jnp.sin(2 * jnp.pi * grid), grid * (1 - grid)])
+
+
+def residual(x, y):
+    laplacian = -2.0 * y + jnp.roll(y, 1) + jnp.roll(y, -1)
+    return -laplacian + 0.5 * y - x @ shapes
+
+
+domain = sx.box([-1.0, -1.0, -1.0], [1.0, 1.0, 1.0])
+method = sx.ReducedSolve(
+    form=sx.Affine(), unknown_domain=sx.box([-3.0] * 64, [3.0] * 64), rank=3, newton_steps=5
+)
+surrogate = sx.fit_implicit(residual, domain, method, samples=128)
+
+# The 64 unknowns are predicted through 3 reduced coefficients.
+assert surrogate.output_reduction.encode_matrix.shape[0] == 3
+assert float(surrogate.report.value_mean) < 1e-3
+```
+
 ## The objective route
 
 There is also an experimental route that never inverts anything. It fits `f`

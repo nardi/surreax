@@ -1,4 +1,4 @@
-"""Tests for implicit fitting through the inverse map."""
+"""Tests for implicit fitting through the inverse map and the objective route."""
 
 import jax
 import jax.numpy as jnp
@@ -12,8 +12,8 @@ def test_affine_in_the_unknown_is_recovered_exactly() -> None:
         return y - 2.0 * x
 
     domain = sx.box([-1.0], [1.0])
-    unknown_domain = sx.box([-3.0], [3.0])
-    surrogate = sx.fit_implicit(residual, domain, unknown_domain, sx.Affine(), samples=256)
+    method = sx.InverseMap(form=sx.Affine(), unknown_domain=sx.box([-3.0], [3.0]))
+    surrogate = sx.fit_implicit(residual, domain, method, samples=256)
     assert float(surrogate.report.value_max) < 1e-4
     prediction = surrogate(jnp.array([0.5]))
     assert jnp.allclose(prediction, jnp.array([1.0]), atol=1e-3)
@@ -26,8 +26,8 @@ def test_coupled_affine_system_is_recovered_exactly() -> None:
         return matrix @ y - x
 
     domain = sx.box([-1.0, -1.0], [1.0, 1.0])
-    unknown_domain = sx.box([-1.0, -1.0], [1.0, 1.0])
-    surrogate = sx.fit_implicit(residual, domain, unknown_domain, sx.Affine(), samples=256)
+    method = sx.InverseMap(form=sx.Affine(), unknown_domain=sx.box([-1.0, -1.0], [1.0, 1.0]))
+    surrogate = sx.fit_implicit(residual, domain, method, samples=256)
     assert float(surrogate.report.value_max) < 1e-4
     solved = jnp.linalg.solve(matrix, jnp.array([0.4, -0.2]))
     assert jnp.allclose(surrogate(jnp.array([0.4, -0.2])), solved, atol=1e-3)
@@ -39,29 +39,33 @@ def _cubic(x: jax.Array, y: jax.Array) -> jax.Array:
 
 def test_newton_steps_lower_the_residual() -> None:
     domain = sx.box([-2.0], [2.0])
-    unknown_domain = sx.box([-1.2], [1.2])
     form = sx.ChebyshevPolynomial(degree=4)
-    without = sx.fit_implicit(_cubic, domain, unknown_domain, form, samples=512, newton_steps=0)
-    with_steps = sx.fit_implicit(_cubic, domain, unknown_domain, form, samples=512, newton_steps=2)
+    unknown_domain = sx.box([-1.2], [1.2])
+    without = sx.fit_implicit(
+        _cubic, domain, sx.InverseMap(form=form, unknown_domain=unknown_domain, newton_steps=0),
+        samples=512,
+    )
+    with_steps = sx.fit_implicit(
+        _cubic, domain, sx.InverseMap(form=form, unknown_domain=unknown_domain, newton_steps=2),
+        samples=512,
+    )
     assert float(with_steps.report.value_mean) < float(without.report.value_mean)
 
 
 def test_nonlinear_monotone_reaches_a_low_residual() -> None:
     domain = sx.box([-2.0], [2.0])
-    unknown_domain = sx.box([-1.2], [1.2])
     form = sx.ChebyshevPolynomial(degree=4)
-    surrogate = sx.fit_implicit(_cubic, domain, unknown_domain, form, samples=512, newton_steps=2)
+    method = sx.InverseMap(form=form, unknown_domain=sx.box([-1.2], [1.2]), newton_steps=2)
+    surrogate = sx.fit_implicit(_cubic, domain, method, samples=512)
     assert float(surrogate.report.value_mean) < 0.5
 
 
 def test_iterative_refinement_drives_the_residual_down() -> None:
     domain = sx.box([-2.0], [2.0])
-    unknown_domain = sx.box([-1.2], [1.2])
     form = sx.ChebyshevPolynomial(degree=4)
-    base = sx.fit_implicit(_cubic, domain, unknown_domain, form, samples=512, newton_steps=2)
-    refined = sx.fit_implicit(
-        _cubic, domain, unknown_domain, form, samples=512, newton_steps=2, refinement_steps=3
-    )
+    method = sx.InverseMap(form=form, unknown_domain=sx.box([-1.2], [1.2]), newton_steps=2)
+    base = sx.fit_implicit(_cubic, domain, method, samples=512)
+    refined = sx.fit_implicit(_cubic, domain, method, samples=512, refine_steps=3)
     assert float(refined.report.value_mean) < float(base.report.value_mean) / 5
 
 
@@ -69,10 +73,34 @@ def test_objective_route_leaves_a_small_residual() -> None:
     domain = sx.box([-2.0], [2.0])
     form = sx.ChebyshevPolynomial(degree=4)
     # The objective route fits f directly by minimizing the residual, no inversion.
-    surrogate = sx.fit_implicit_objective(
-        _cubic, domain, form, unknown_dimension=1, samples=256, steps=600
-    )
+    method = sx.Objective(form=form, unknown_dimension=1, steps=600)
+    surrogate = sx.fit_implicit(_cubic, domain, method, samples=256)
     assert float(surrogate.report.value_mean) < 0.15
+
+
+def test_fit_data_recovers_a_linear_map_from_pairs() -> None:
+    key = jax.random.key(0)
+    inputs = jax.random.uniform(key, (200, 3), minval=-1.0, maxval=1.0)
+    weights = jnp.array([[1.0, -2.0, 0.5], [0.0, 1.0, 3.0]])
+    outputs = jax.vmap(lambda x: weights @ x + jnp.array([0.5, -1.0]))(inputs)
+    surrogate = sx.fit_data(inputs, outputs, sx.Affine())
+    assert float(surrogate.report.value_max) < 1e-3
+    assert jnp.allclose(surrogate(inputs[0]), outputs[0], atol=1e-3)
+
+
+def test_root_find_and_refine_solve_a_scalar_root() -> None:
+    def residual(x: jax.Array, y: jax.Array) -> jax.Array:
+        return y**3 + y - x
+
+    # A crude constant guess, driven to the root by Newton steps at call time.
+    guess = sx.root_find(residual, lambda x: x / 2.0, steps=8)
+    point = jnp.array([2.0])
+    left = residual(point, guess(point))
+    assert float(jnp.abs(left[0])) < 1e-5
+
+    # refine wraps an existing surrogate the same way.
+    polished = sx.refine(lambda x: x / 2.0, residual, steps=8)
+    assert jnp.allclose(polished(point), guess(point))
 
 
 def test_implicit_surrogate_survives_jit_vmap_and_grad() -> None:
@@ -80,8 +108,8 @@ def test_implicit_surrogate_survives_jit_vmap_and_grad() -> None:
         return y - 2.0 * x
 
     domain = sx.box([-1.0], [1.0])
-    unknown_domain = sx.box([-3.0], [3.0])
-    surrogate = sx.fit_implicit(residual, domain, unknown_domain, sx.Affine(), samples=256)
+    method = sx.InverseMap(form=sx.Affine(), unknown_domain=sx.box([-3.0], [3.0]))
+    surrogate = sx.fit_implicit(residual, domain, method, samples=256)
     point = jnp.array([0.3])
 
     plain = surrogate(point)

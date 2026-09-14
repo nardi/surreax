@@ -23,9 +23,14 @@ from surreax.forms import (
 )
 from surreax.implicit import (
     ImplicitSurrogate,
+    InverseMap,
+    Objective,
+    RefinedSurrogate,
     Residual,
+    fit_data,
     fit_implicit,
-    fit_implicit_objective,
+    refine,
+    root_find,
 )
 from surreax.reduction import active_subspace_inputs, pca_inputs, pca_outputs
 from surreax.report import ErrorReport
@@ -45,12 +50,15 @@ __all__ = [
     "Grid",
     "GridExport",
     "ImplicitSurrogate",
+    "InverseMap",
     "LinearForm",
     "MaxAffine",
     "MaxAffineExport",
     "MaxAffineForm",
     "Network",
     "NetworkForm",
+    "Objective",
+    "RefinedSurrogate",
     "Residual",
     "Structure",
     "Target",
@@ -61,10 +69,12 @@ __all__ = [
     "export",
     "fit",
     "fit_adaptive",
+    "fit_data",
     "fit_implicit",
-    "fit_implicit_objective",
     "fit_separable",
     "pca_inputs",
     "pca_outputs",
     "prune_inputs",
+    "refine",
+    "root_find",
 ]

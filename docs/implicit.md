@@ -204,7 +204,9 @@ that small reduced space.
 The solve is matrix-free through lineax by default, so it never forms the dense
 Jacobian. lineax finds the Newton step by GMRES from the Jacobian-vector product
 alone, which is what keeps a large unknown tractable. See Rackauckas and
-colleagues on [lineax](https://arxiv.org/abs/2311.17283).
+colleagues on [lineax](https://arxiv.org/abs/2311.17283). This reaches an unknown
+of several thousand states with a sparse Jacobian, since the solve cost follows
+the sparsity, not the state size.
 
 Here the unknown is a field of 64 states coupled by a nearest-neighbor
 Laplacian, driven by three inputs, so the solution lives on a rank-3 manifold.

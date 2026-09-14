@@ -72,3 +72,43 @@ def test_benchmark_worst_case_search(benchmark, surrogate: sx.FittedSurrogate) -
 
     search()
     benchmark(search)
+
+
+def _reduced_solve_method() -> sx.ReducedSolve:
+    return sx.ReducedSolve(
+        form=sx.Affine(),
+        unknown_domain=systems.large_sparse_unknown_domain(),
+        rank=systems.LARGE_INPUTS,
+        snapshots=16,
+        newton_steps=4,
+        reduced_steps=4,
+    )
+
+
+def test_benchmark_large_reduced_solve_fit(benchmark) -> None:
+    # A small input, a large field, and a sparse Jacobian, fitted through a few
+    # snapshot solves and a reduced Newton, so the cost is set by the snapshots.
+    domain = systems.large_sparse_domain()
+    method = _reduced_solve_method()
+
+    def build() -> sx.FittedSurrogate:
+        surrogate = sx.fit_implicit(
+            systems.large_sparse_residual, domain, method, samples=64
+        )
+        return jax.block_until_ready(surrogate(jnp.zeros(systems.LARGE_INPUTS)))
+
+    build()
+    benchmark(build)
+
+
+def test_benchmark_large_field_call(benchmark) -> None:
+    surrogate = sx.fit_implicit(
+        systems.large_sparse_residual,
+        systems.large_sparse_domain(),
+        _reduced_solve_method(),
+        samples=64,
+    )
+    call = eqx.filter_jit(surrogate)
+    point = jnp.array([0.4, -0.2, 0.6, 0.0])
+    jax.block_until_ready(call(point))
+    benchmark(lambda: jax.block_until_ready(call(point)))

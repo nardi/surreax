@@ -95,3 +95,52 @@ def few_active_inputs(x: Float[Array, " 12"]) -> Float[Array, " 1"]:
 def high_dimensional_domain() -> sx.Box:
     """A box over many inputs, most of which the target ignores."""
     return sx.box([-1.0] * HIGH_DIMENSION, [1.0] * HIGH_DIMENSION)
+
+
+LARGE_STATE = 4096
+"""Size of the large unknown for the sparse scaling system."""
+
+LARGE_INPUTS = 4
+"""Number of source amplitudes driving the large sparse system."""
+
+
+def _large_modes(state: int) -> Float[Array, "4 state"]:
+    """Four smooth periodic source shapes over the grid."""
+    grid = jnp.linspace(0.0, 1.0, state)
+    return jnp.stack(
+        [
+            jnp.sin(2 * jnp.pi * grid),
+            jnp.cos(2 * jnp.pi * grid),
+            jnp.sin(4 * jnp.pi * grid),
+            jnp.cos(4 * jnp.pi * grid),
+        ]
+    )
+
+
+_LARGE_MODES = _large_modes(LARGE_STATE)
+
+
+def large_sparse_residual(
+    x: Float[Array, " 4"], y: Float[Array, " state"]
+) -> Float[Array, " state"]:
+    """Residual of a diffusion-reaction field driven by a few source amplitudes.
+
+    The input is small, the source amplitudes, and the unknown is a large field.
+    The nearest-neighbor Laplacian couples each state to its two neighbors, so the
+    Jacobian in the unknown has three nonzeros per row. The field is driven by
+    four smooth modes, so the solution lies on a four-dimensional manifold no
+    matter how fine the grid. This is the case the sparse solve and the output
+    reduction are built for.
+    """
+    laplacian = -2.0 * y + jnp.roll(y, 1) + jnp.roll(y, -1)
+    return -laplacian + 0.5 * y - x @ _LARGE_MODES
+
+
+def large_sparse_domain() -> sx.Box:
+    """A box over the four source amplitudes."""
+    return sx.box([-1.0] * LARGE_INPUTS, [1.0] * LARGE_INPUTS)
+
+
+def large_sparse_unknown_domain() -> sx.Box:
+    """A box over the large field, for sampling solve starts."""
+    return sx.box([-3.0] * LARGE_STATE, [3.0] * LARGE_STATE)

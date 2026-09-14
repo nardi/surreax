@@ -175,9 +175,9 @@ def _diffusion(x: jax.Array, y: jax.Array) -> jax.Array:
     return -laplacian + 0.5 * y - x @ _SHAPES
 
 
-def test_reduced_solve_fits_a_large_sparse_system() -> None:
+def test_exact_solve_fits_a_large_sparse_system() -> None:
     domain = sx.box([-1.0, -1.0, -1.0], [1.0, 1.0, 1.0])
-    method = sx.ReducedSolve(
+    method = sx.ExactSolve(
         form=sx.Affine(), unknown_domain=sx.box([-3.0] * 64, [3.0] * 64), rank=3, newton_steps=5
     )
     surrogate = sx.fit_implicit(_diffusion, domain, method, samples=128)
@@ -200,13 +200,13 @@ def test_matrix_free_solve_matches_the_dense_solve() -> None:
     assert jnp.allclose(dense, matrix_free, atol=1e-5)
 
 
-def test_reduced_solve_dense_route_agrees_with_matrix_free() -> None:
+def test_exact_solve_dense_route_agrees_with_matrix_free() -> None:
     domain = sx.box([-1.0, -1.0, -1.0], [1.0, 1.0, 1.0])
     unknown_domain = sx.box([-3.0] * 64, [3.0] * 64)
     dense = sx.fit_implicit(
         _diffusion,
         domain,
-        sx.ReducedSolve(
+        sx.ExactSolve(
             form=sx.Affine(),
             unknown_domain=unknown_domain,
             rank=3,

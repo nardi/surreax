@@ -193,11 +193,11 @@ assert float(surrogate.report.value_max) < 1e-3
 ## Large sparse systems
 
 When the input is small but the unknown is large, a physical model discretized
-over many states, the `ReducedSolve` method fits `f` at a scale the inverse map
+over many states, the `ExactSolve` method fits `f` at a scale the inverse map
 cannot reach. It rests on two facts. The residual Jacobian in the unknown is
 sparse, so the Newton solve is cheap when the sparsity is used, and `f` maps a
 small input to a large unknown, so the solved unknowns trace a manifold no wider
-than the input. `ReducedSolve` solves `g = 0` at each sample, collapses the
+than the input. `ExactSolve` solves `g = 0` at each sample, collapses the
 solved unknowns onto their leading principal directions, and fits the map into
 that small reduced space.
 
@@ -209,7 +209,7 @@ colleagues on [lineax](https://arxiv.org/abs/2311.17283).
 Here the unknown is a field of 64 states coupled by a nearest-neighbor
 Laplacian, driven by three inputs, so the solution lives on a rank-3 manifold.
 
-<!-- name: test_implicit_reduced_solve -->
+<!-- name: test_implicit_exact_solve -->
 ```python
 import jax
 import jax.numpy as jnp
@@ -225,7 +225,7 @@ def residual(x, y):
 
 
 domain = sx.box([-1.0, -1.0, -1.0], [1.0, 1.0, 1.0])
-method = sx.ReducedSolve(
+method = sx.ExactSolve(
     form=sx.Affine(), unknown_domain=sx.box([-3.0] * 64, [3.0] * 64), rank=3, newton_steps=5
 )
 surrogate = sx.fit_implicit(residual, domain, method, samples=128)

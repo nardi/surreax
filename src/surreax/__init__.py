@@ -22,11 +22,11 @@ from surreax.forms import (
     NetworkForm,
 )
 from surreax.implicit import (
+    ExactSolve,
     FoldReport,
     ImplicitSurrogate,
     InverseMap,
     Objective,
-    ReducedSolve,
     RefinedSurrogate,
     Residual,
     fit_data,
@@ -48,6 +48,7 @@ __all__ = [
     "DifferenceOfMaxAffineForm",
     "Domain",
     "ErrorReport",
+    "ExactSolve",
     "FittedSurrogate",
     "FoldReport",
     "Grid",
@@ -61,7 +62,6 @@ __all__ = [
     "Network",
     "NetworkForm",
     "Objective",
-    "ReducedSolve",
     "RefinedSurrogate",
     "Residual",
     "Structure",

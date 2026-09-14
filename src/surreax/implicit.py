@@ -297,7 +297,7 @@ def _branch_mask(
     return keep, jnp.mean(~keep)
 
 
-class ReducedSolve(eqx.Module):
+class ExactSolve(eqx.Module):
     """Fit a large-unknown target by solving the residual then reducing the output.
 
     Suits a system where the input is small but the unknown is large. It solves
@@ -316,10 +316,10 @@ class ReducedSolve(eqx.Module):
     matrix_free: bool = eqx.field(static=True, default=True)
 
 
-def _fit_reduced_solve(
+def _fit_exact_solve(
     residual: Residual,
     inputs: Float[Array, "n d"],
-    method: ReducedSolve,
+    method: ExactSolve,
     holdout: float,
     ridge: float,
 ) -> FittedSurrogate:
@@ -436,7 +436,7 @@ def _fit_objective(
 def fit_implicit(
     residual: Residual,
     domain: Domain,
-    method: InverseMap | Objective | ReducedSolve,
+    method: InverseMap | Objective | ExactSolve,
     *,
     samples: int = 512,
     holdout: float = 0.2,
@@ -462,8 +462,8 @@ def fit_implicit(
             )
         case Objective():
             base = _fit_objective(residual, domain, train_inputs, method)
-        case ReducedSolve():
-            base = _fit_reduced_solve(residual, train_inputs, method, holdout, ridge)
+        case ExactSolve():
+            base = _fit_exact_solve(residual, train_inputs, method, holdout, ridge)
         case _:
             raise TypeError(f"unsupported implicit method: {type(method).__name__}")
 

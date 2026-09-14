@@ -205,3 +205,31 @@ def separable(x):
 structure = sx.analyze(separable, sx.box([-1.0] * 4, [1.0] * 4), samples=128)
 assert structure.input_block[0] != structure.input_block[2]
 ```
+
+## Separable fitting
+
+When a target splits into independent blocks, `fit_separable` fits each block on
+its own inputs and assembles the pieces, which is faster and more accurate than
+one fit over everything. It reads the blocks from the structural analysis. Pass
+one form for every block, or a sequence of forms in sorted-block order, so a
+linear block can take a closed-form fit and a nonlinear one a richer form.
+
+<!-- name: test_techniques_separable -->
+```python
+import jax.numpy as jnp
+import surreax as sx
+
+
+def target(x):
+    # Two independent blocks: a linear one and a nonlinear one.
+    return jnp.array([2 * x[0] - 1.0, jnp.sin(3 * x[1])])
+
+
+domain = sx.box([-1.0, -1.0], [1.0, 1.0])
+surrogate = sx.fit_separable(target, domain, [sx.Affine(), sx.ChebyshevPolynomial(degree=5)])
+
+point = jnp.array([0.4, 0.5])
+assert jnp.allclose(surrogate(point), target(point), atol=1e-2)
+# The report bounds the error from any coupling dropped between blocks.
+assert float(surrogate.report.projection_max) < 1e-5
+```

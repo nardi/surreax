@@ -5,6 +5,7 @@ returns a `FittedSurrogate` that keeps the chosen form.
 """
 
 from surreax.api import Target, fit, fit_adaptive
+from surreax.composite import CompositeSurrogate, fit_separable
 from surreax.domain import Box, Domain, box, box_from_data
 from surreax.fitted import FittedSurrogate
 from surreax.forms import (
@@ -32,6 +33,7 @@ __all__ = [
     "Affine",
     "Box",
     "ChebyshevPolynomial",
+    "CompositeSurrogate",
     "DifferenceOfMaxAffine",
     "DifferenceOfMaxAffineForm",
     "Domain",
@@ -54,6 +56,7 @@ __all__ = [
     "fit_adaptive",
     "fit_implicit",
     "fit_implicit_objective",
+    "fit_separable",
     "pca_inputs",
     "pca_outputs",
     "prune_inputs",

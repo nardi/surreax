@@ -18,9 +18,10 @@ from collections.abc import Callable
 import equinox as eqx
 import jax
 import jax.numpy as jnp
+import numpy as np
 import optax
 import optimistix as optx
-from jaxtyping import Array, Float
+from jaxtyping import Array, Bool, Float
 
 from surreax import normalize, reduction, sampling
 from surreax.domain import Domain, box_from_data
@@ -115,6 +116,27 @@ def _newton_step(
     return y - jnp.linalg.solve(jacobian, residual(x, y))
 
 
+class FoldReport(eqx.Module):
+    """Where the residual folds and how tightly one branch was kept.
+
+    The residual folds where its Jacobian in the unknown turns singular, so no
+    function of the input exists across the fold. The fit stays on one branch and
+    flags the fold rather than averaging through it.
+    """
+
+    min_determinant: Float[Array, ""]
+    """Smallest `|det(dg/dy)|` seen over the samples, near zero at a fold."""
+
+    boundary_point: Float[Array, " d"]
+    """Flat input where that smallest determinant occurs."""
+
+    off_branch: Float[Array, ""]
+    """Fraction of samples dropped for lying on a different branch than the anchor."""
+
+    folds: bool = eqx.field(static=True)
+    """Whether the smallest determinant fell below the fold tolerance."""
+
+
 class ImplicitSurrogate(eqx.Module):
     """The zero-residual slice of a fitted inverse map, `f(x) = h(x, 0)`.
 
@@ -126,6 +148,7 @@ class ImplicitSurrogate(eqx.Module):
     inverse_map: FittedSurrogate
     residual_dimension: int = eqx.field(static=True)
     report: ErrorReport
+    fold: FoldReport
 
     def __call__(self, x: Float[Array, " n"]) -> Float[Array, " m"]:
         augmented = jnp.concatenate([x, jnp.zeros(self.residual_dimension)])
@@ -168,11 +191,19 @@ def root_find(residual: Residual, initial: Surrogate, *, steps: int) -> RefinedS
 
 
 class InverseMap(eqx.Module):
-    """Fit the target by inverting the residual and reading the zero slice."""
+    """Fit the target by inverting the residual and reading the zero slice.
+
+    The fit keeps one solution branch, judged by the sign of `det(dg/dy)`, so a
+    residual with several branches is not averaged. Turning `continuation` on
+    orders the samples along the first input coordinate and warm-starts each
+    solve from the previous solution, which follows one branch through a fold.
+    """
 
     form: LinearForm
     unknown_domain: Domain
     newton_steps: int = eqx.field(static=True, default=1)
+    continuation: bool = eqx.field(static=True, default=False)
+    fold_tolerance: float = eqx.field(static=True, default=1e-3)
 
 
 class Objective(eqx.Module):
@@ -188,6 +219,57 @@ class Objective(eqx.Module):
     learning_rate: float = eqx.field(static=True, default=0.01)
 
 
+def _solve_independently(
+    residual: Residual,
+    inputs: Float[Array, "n d"],
+    starts: Float[Array, "n m"],
+    newton_steps: int,
+) -> Float[Array, "n m"]:
+    """Newton-solve every sample from its own start, in parallel."""
+    unknowns = starts
+    for _ in range(newton_steps):
+        unknowns = jax.vmap(lambda x, y: _newton_step(residual, x, y))(inputs, unknowns)
+    return unknowns
+
+
+def _solve_by_continuation(
+    residual: Residual,
+    inputs: Float[Array, "n d"],
+    starts: Float[Array, "n m"],
+    newton_steps: int,
+) -> Float[Array, "n m"]:
+    """Newton-solve along the first input coordinate, warm-started from the last.
+
+    Ordering the samples into a path and carrying the solution forward keeps the
+    solve on one branch through a fold, since each start is already near the next
+    solution. Returns the unknowns in the original sample order.
+    """
+    order = jnp.argsort(inputs[:, 0])
+    ordered_inputs = inputs[order]
+
+    def step(previous, x):
+        unknown = previous
+        for _ in range(max(1, newton_steps)):
+            unknown = _newton_step(residual, x, unknown)
+        return unknown, unknown
+
+    _, ordered_unknowns = jax.lax.scan(step, starts[order][0], ordered_inputs)
+    return ordered_unknowns[jnp.argsort(order)]
+
+
+def _branch_mask(
+    determinants: Float[Array, " n"],
+) -> tuple[Bool[Array, " n"], Float[Array, ""]]:
+    """Keep the samples whose determinant sign matches the most interior sample.
+
+    The anchor is the sample with the largest `|det|`, the furthest from a fold,
+    so its branch is the reliable one to keep.
+    """
+    anchor_sign = jnp.sign(determinants[jnp.argmax(jnp.abs(determinants))])
+    keep = determinants * anchor_sign > 0
+    return keep, jnp.mean(~keep)
+
+
 def _fit_inverse_map(
     residual: Residual,
     inputs: Float[Array, "n d"],
@@ -195,19 +277,43 @@ def _fit_inverse_map(
     holdout: float,
     ridge: float,
 ) -> ImplicitSurrogate:
-    """Sample unknowns, pull them to the manifold, and fit the inverse map."""
-    unknowns = sampling.sample(method.unknown_domain, inputs.shape[0], seed=0)
-    for _ in range(method.newton_steps):
-        unknowns = jax.vmap(lambda x, y: _newton_step(residual, x, y))(inputs, unknowns)
-    residuals = jax.vmap(residual)(inputs, unknowns)
-    augmented = jnp.concatenate([inputs, residuals], axis=1)
-    inverse_map = fit_data(augmented, unknowns, method.form, holdout=holdout, ridge=ridge)
+    """Solve for the unknowns, keep one branch, and fit the inverse map.
+
+    The Jacobian in the unknown is computed for the solve anyway, so its
+    determinant comes for free and drives both the branch filter and the fold
+    flag.
+    """
+    starts = sampling.sample(method.unknown_domain, inputs.shape[0], seed=0)
+    solve = _solve_by_continuation if method.continuation else _solve_independently
+    unknowns = solve(residual, inputs, starts, method.newton_steps)
+
+    determinants = jax.vmap(
+        lambda x, y: jnp.linalg.det(jax.jacobian(lambda u: residual(x, u))(y))
+    )(inputs, unknowns)
+    keep, off_branch = _branch_mask(determinants)
+    smallest = jnp.argmin(jnp.abs(determinants))
+    fold = FoldReport(
+        min_determinant=jnp.abs(determinants[smallest]),
+        boundary_point=inputs[smallest],
+        off_branch=off_branch,
+        folds=bool(jnp.abs(determinants[smallest]) < method.fold_tolerance),
+    )
+
+    # Boolean indexing runs eagerly here, so the kept subset can shrink freely.
+    kept = np.asarray(keep)
+    on_branch_inputs, on_branch_unknowns = inputs[kept], unknowns[kept]
+    residuals = jax.vmap(residual)(on_branch_inputs, on_branch_unknowns)
+    augmented = jnp.concatenate([on_branch_inputs, residuals], axis=1)
+    inverse_map = fit_data(
+        augmented, on_branch_unknowns, method.form, holdout=holdout, ridge=ridge
+    )
     return ImplicitSurrogate(
         inverse_map=inverse_map,
         residual_dimension=residuals.shape[1],
         report=_value_report(
             jnp.asarray(0.0), jnp.asarray(0.0), inputs.shape[1], inverse_map.report.structure_cost
         ),
+        fold=fold,
     )
 
 

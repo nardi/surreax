@@ -75,6 +75,47 @@ The residual the surrogate leaves is in `surrogate.report.value_mean`. A
 multi-solution residual needs the branch handling planned for a later version,
 so the current fit assumes a unique solution over the domain.
 
+## Branches and folds
+
+A residual can have several solution branches, and it can fold, at a point where
+its Jacobian in the unknown turns singular and no function of the input exists.
+The fit keeps one branch, chosen by the sign of `det(dg/dy)` at the most interior
+sample, so a two-branch residual is not averaged into a meaningless middle. The
+`fold` report says how much was dropped as off-branch, and flags a fold when the
+smallest determinant falls below the tolerance.
+
+Here `g(x, y) = y**2 - x` has two branches, `y = +sqrt(x)` and `y = -sqrt(x)`,
+and folds at `x = 0`.
+
+<!-- name: test_implicit_branches -->
+```python
+import jax
+import jax.numpy as jnp
+import surreax as sx
+
+
+def residual(x, y):
+    return y**2 - x
+
+
+domain = sx.box([0.25], [1.0])
+method = sx.InverseMap(
+    form=sx.ChebyshevPolynomial(degree=4), unknown_domain=sx.box([-1.1], [1.1]), newton_steps=6
+)
+surrogate = sx.fit_implicit(residual, domain, method, samples=256)
+
+# The surrogate sits on one branch, so every prediction shares a sign.
+points = jnp.linspace(0.3, 0.95, 20)[:, None]
+predictions = jax.vmap(surrogate)(points)[:, 0]
+assert bool(jnp.all(predictions > 0)) or bool(jnp.all(predictions < 0))
+assert float(surrogate.fold.off_branch) > 0.3
+```
+
+Turning `continuation` on orders the samples along the first input coordinate and
+warm-starts each solve from the previous solution, which follows one branch even
+across a fold. It suits a residual whose branches meet, where independent solves
+from random starts would scatter across both.
+
 ## Iterative refinement
 
 Any surrogate can polish each prediction with a few Newton steps on the

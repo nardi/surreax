@@ -22,6 +22,7 @@ from surreax.forms import (
     NetworkForm,
 )
 from surreax.implicit import (
+    FoldReport,
     ImplicitSurrogate,
     InverseMap,
     Objective,
@@ -47,6 +48,7 @@ __all__ = [
     "Domain",
     "ErrorReport",
     "FittedSurrogate",
+    "FoldReport",
     "Grid",
     "GridExport",
     "ImplicitSurrogate",

@@ -78,6 +78,63 @@ def test_objective_route_leaves_a_small_residual() -> None:
     assert float(surrogate.report.value_mean) < 0.15
 
 
+def _square(x: jax.Array, y: jax.Array) -> jax.Array:
+    # Two branches, y = +-sqrt(x), and a fold at x = 0 where dg/dy = 2y vanishes.
+    return y**2 - x
+
+
+def test_two_branch_residual_stays_on_one_branch() -> None:
+    domain = sx.box([0.25], [1.0])
+    # Symmetric starts land on both branches, so a naive fit would average them.
+    method = sx.InverseMap(
+        form=sx.ChebyshevPolynomial(degree=4),
+        unknown_domain=sx.box([-1.1], [1.1]),
+        newton_steps=6,
+    )
+    surrogate = sx.fit_implicit(_square, domain, method, samples=256)
+    points = jnp.linspace(0.3, 0.95, 20)[:, None]
+    predictions = jax.vmap(surrogate)(points)[:, 0]
+    assert bool(jnp.all(predictions > 0)) or bool(jnp.all(predictions < 0))
+    assert float(surrogate.report.value_mean) < 0.05
+    assert float(surrogate.fold.off_branch) > 0.3
+
+
+def test_fold_is_flagged_where_the_jacobian_turns_singular() -> None:
+    folding = sx.InverseMap(
+        form=sx.ChebyshevPolynomial(degree=4),
+        unknown_domain=sx.box([0.05], [1.1]),
+        newton_steps=6,
+        fold_tolerance=0.3,
+    )
+    fold_fit = sx.fit_implicit(_square, sx.box([0.0], [1.0]), folding, samples=256)
+    assert fold_fit.fold.folds
+    assert float(fold_fit.fold.boundary_point[0]) < 0.1
+
+    monotone = sx.InverseMap(
+        form=sx.ChebyshevPolynomial(degree=4),
+        unknown_domain=sx.box([-1.2], [1.2]),
+        newton_steps=2,
+        fold_tolerance=0.3,
+    )
+    monotone_fit = sx.fit_implicit(_cubic, sx.box([-2.0], [2.0]), monotone, samples=256)
+    assert not monotone_fit.fold.folds
+    assert float(monotone_fit.fold.min_determinant) > float(fold_fit.fold.min_determinant)
+
+
+def test_continuation_follows_one_branch() -> None:
+    method = sx.InverseMap(
+        form=sx.ChebyshevPolynomial(degree=4),
+        unknown_domain=sx.box([0.05], [1.1]),
+        newton_steps=6,
+        continuation=True,
+    )
+    surrogate = sx.fit_implicit(_square, sx.box([0.0], [1.0]), method, samples=256)
+    points = jnp.linspace(0.1, 0.95, 20)[:, None]
+    predictions = jax.vmap(surrogate)(points)[:, 0]
+    assert bool(jnp.all(predictions > 0))
+    assert float(surrogate.report.value_mean) < 0.05
+
+
 def test_fit_data_recovers_a_linear_map_from_pairs() -> None:
     key = jax.random.key(0)
     inputs = jax.random.uniform(key, (200, 3), minval=-1.0, maxval=1.0)

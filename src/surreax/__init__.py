@@ -7,13 +7,14 @@ returns a `FittedSurrogate` that keeps the chosen form.
 from surreax.api import Target, fit, fit_adaptive
 from surreax.composite import CompositeSurrogate, fit_separable
 from surreax.domain import Box, Domain, box, box_from_data
-from surreax.export import DifferenceExport, MaxAffineExport, export
+from surreax.export import DifferenceExport, GridExport, MaxAffineExport, export
 from surreax.fitted import FittedSurrogate
 from surreax.forms import (
     Affine,
     ChebyshevPolynomial,
     DifferenceOfMaxAffine,
     DifferenceOfMaxAffineForm,
+    Grid,
     LinearForm,
     MaxAffine,
     MaxAffineForm,
@@ -41,6 +42,8 @@ __all__ = [
     "Domain",
     "ErrorReport",
     "FittedSurrogate",
+    "Grid",
+    "GridExport",
     "ImplicitSurrogate",
     "LinearForm",
     "MaxAffine",

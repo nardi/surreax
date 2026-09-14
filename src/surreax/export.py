@@ -25,7 +25,9 @@ import numpy as np
 from jaxtyping import Array, Float
 
 from surreax.fitted import FittedSurrogate
+from surreax.fitting import LinearModel
 from surreax.forms.difference_max_affine import DifferenceOfMaxAffine
+from surreax.forms.grid import Grid
 from surreax.forms.max_affine import MaxAffine
 
 
@@ -50,6 +52,18 @@ class DifferenceExport(eqx.Module):
     positive_intercepts: Float[Array, "k m"]
     negative_slopes: Float[Array, "k n d"]
     negative_intercepts: Float[Array, "k n"]
+
+
+class GridExport(eqx.Module):
+    """Node coordinates and values of a grid surrogate, in the original coordinates.
+
+    `axes` holds the node coordinates per input axis, and `values` holds the node
+    output over the grid, output first, so a solver can encode the interpolation.
+    """
+
+    axes: tuple[Float[Array, " r"], ...]
+    values: Array
+    """Node output over the grid, shaped output first then one axis per input."""
 
 
 def _input_affine(surrogate: FittedSurrogate) -> tuple[Float[Array, "r d"], Float[Array, " r"]]:
@@ -92,11 +106,34 @@ def _fold(
     return scaled_slopes, scaled_intercepts
 
 
-def export(surrogate: FittedSurrogate) -> MaxAffineExport | DifferenceExport:
+def _grid_export(surrogate: FittedSurrogate, model: LinearModel, resolution: int) -> GridExport:
+    """Recover the grid node coordinates and values in the original coordinates."""
+    reduction = surrogate.input_reduction
+    identity = jnp.eye(reduction.encode_matrix.shape[0])
+    if not bool(np.allclose(np.asarray(reduction.encode_matrix), np.asarray(identity))):
+        raise ValueError("grid export needs an identity input reduction")
+    output_scale, output_center = _output_scale(surrogate)
+    normalizer = surrogate.input_normalizer
+    normalized_axis = jnp.linspace(-1.0, 1.0, resolution)
+    axes = tuple(
+        center + scale * normalized_axis
+        for center, scale in zip(normalizer.center, normalizer.scale, strict=True)
+    )
+    dimension = normalizer.center.shape[0]
+    outputs = model.weights.shape[0]
+    node_values = model.weights.reshape((outputs, *([resolution] * dimension)))
+    reshaped_scale = output_scale.reshape((outputs, *([1] * dimension)))
+    reshaped_center = output_center.reshape((outputs, *([1] * dimension)))
+    return GridExport(axes=axes, values=reshaped_scale * node_values + reshaped_center)
+
+
+def export(surrogate: FittedSurrogate) -> MaxAffineExport | DifferenceExport | GridExport:
     """Export a fitted piecewise linear surrogate as arrays in original coordinates."""
+    model = surrogate.model
+    if isinstance(model, LinearModel) and isinstance(model.form, Grid):
+        return _grid_export(surrogate, model, model.form.resolution)
     matrix, offset = _input_affine(surrogate)
     scale, center = _output_scale(surrogate)
-    model = surrogate.model
     if isinstance(model, MaxAffine):
         slopes, intercepts = _fold(model.slopes, model.intercepts, matrix, offset, scale, center)
         return MaxAffineExport(slopes=slopes, intercepts=intercepts)

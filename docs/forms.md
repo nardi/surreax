@@ -164,6 +164,32 @@ surrogate = sx.fit(smooth, domain, form, samples=256, worst_case_starts=0)
 assert float(surrogate.report.value_mean) < 0.02
 ```
 
+## Grid
+
+The grid form places a regular grid over the input box and interpolates
+multilinearly between the nodes. It is linear in the node values, so it fits by
+one linear solve, and the error falls as the grid refines. The node count grows
+as the resolution to the power of the input dimension, so it is best after a
+reduction, when the reduced input is small.
+
+<!-- name: test_forms_grid -->
+```python
+import jax.numpy as jnp
+import surreax as sx
+
+
+def target(x):
+    return (jnp.sin(2 * x[0]) + x[1] ** 2)[None]
+
+
+domain = sx.box([-1.0, -1.0], [1.0, 1.0])
+surrogate = sx.fit(target, domain, sx.Grid(resolution=16), samples=512, worst_case_starts=0)
+assert float(surrogate.report.value_mean) < 0.02
+```
+
+`export` returns a grid surrogate as its node coordinates and values, so a solver
+can encode the interpolation.
+
 ## Handing a surrogate to a solver
 
 The point of a piecewise linear form is that a solver can reason about it. A

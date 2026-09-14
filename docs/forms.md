@@ -163,3 +163,35 @@ form = sx.NetworkForm(width=32, depth=2, steps=800)
 surrogate = sx.fit(smooth, domain, form, samples=256, worst_case_starts=0)
 assert float(surrogate.report.value_mean) < 0.02
 ```
+
+## Handing a surrogate to a solver
+
+The point of a piecewise linear form is that a solver can reason about it. A
+max-affine surrogate is a maximum of affine pieces, so it is a linear program,
+and a difference of two is a pair of them. `export` returns the slopes and
+intercepts as plain arrays, in the original coordinates, so you can write the
+encoding in whatever optimization framework you use. The library exports arrays
+and nothing else, to stay free of a solver dependency. For the mixed-integer and
+linear-program encodings these arrays feed, see
+[OMLT](https://arxiv.org/abs/2202.02414).
+
+<!-- name: test_forms_export -->
+```python
+import jax
+import jax.numpy as jnp
+import surreax as sx
+
+
+def target(x):
+    return jnp.maximum(2 * x[0] - x[1], x[0] + 2 * x[1])[None]
+
+
+domain = sx.box([-1.0, -1.0], [1.0, 1.0])
+surrogate = sx.fit(target, domain, sx.MaxAffineForm(pieces=2, restarts=6), worst_case_starts=0)
+arrays = sx.export(surrogate)
+
+# The exported pieces reproduce the surrogate on the original input.
+point = jnp.array([0.3, -0.4])
+by_hand = jnp.max(jnp.einsum("kmd,d->km", arrays.slopes, point) + arrays.intercepts, axis=1)
+assert jnp.allclose(by_hand, surrogate(point), atol=1e-4)
+```

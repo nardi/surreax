@@ -351,6 +351,135 @@ def _solve_independently_with(
     return unknowns
 
 
+class ReducedSolve(eqx.Module):
+    """Reduced-order model: solve a projected residual in a small latent space.
+
+    For a large unknown whose solutions lie on a low-dimensional manifold, this
+    builds a proper orthogonal decomposition basis from a few solved snapshots,
+    projects the residual onto that basis in the manner of Galerkin, and solves
+    the reduced residual by Newton in the latent. Each reduced step is an `r` by
+    `r` solve, independent of the unknown size, so the online solve is cheap. It
+    then distills the input-to-latent map into an explicit surrogate, the non-
+    intrusive reduced-order model, so inference needs no solve. The basis is
+    linear here, which suits a manifold whose Kolmogorov n-width decays fast.
+
+    See Benner, Gugercin, and Willcox on projection-based model-order reduction,
+    https://doi.org/10.1137/130932715, and Hesthaven and Ubbiali on the distilled
+    POD-NN, https://doi.org/10.1016/j.jcp.2018.02.037.
+    """
+
+    form: LinearForm
+    unknown_domain: Domain
+    rank: int = eqx.field(static=True)
+    snapshots: int = eqx.field(static=True, default=64)
+    newton_steps: int = eqx.field(static=True, default=8)
+    reduced_steps: int = eqx.field(static=True, default=8)
+    matrix_free: bool = eqx.field(static=True, default=True)
+
+
+def _pod_basis(
+    snapshots: Float[Array, "s m"], rank: int
+) -> tuple[Float[Array, " m"], Float[Array, "r m"]]:
+    """The mean and the leading `rank` principal directions of the snapshots."""
+    center = jnp.mean(snapshots, axis=0)
+    _, _, directions = jnp.linalg.svd(snapshots - center, full_matrices=False)
+    return center, directions[:rank]
+
+
+def _reduced_newton_step(
+    residual: Residual,
+    x: Float[Array, " n"],
+    z: Float[Array, " r"],
+    center: Float[Array, " m"],
+    basis: Float[Array, "r m"],
+) -> Float[Array, " r"]:
+    """One Newton step on the Galerkin-projected residual in the latent.
+
+    The reduced residual is `basis @ g(x, center + basis.T @ z)`, so its Jacobian
+    is the `r` by `r` matrix `basis @ (dg/dy) @ basis.T`, small regardless of the
+    unknown size.
+    """
+
+    def reduced_residual(latent: Float[Array, " r"]) -> Float[Array, " r"]:
+        return basis @ residual(x, center + basis.T @ latent)
+
+    jacobian = jax.jacobian(reduced_residual)(z)
+    return z - jnp.linalg.solve(jacobian, reduced_residual(z))
+
+
+def _fit_reduced_order(
+    residual: Residual,
+    inputs: Float[Array, "n d"],
+    method: ReducedSolve,
+    holdout: float,
+    ridge: float,
+) -> FittedSurrogate:
+    """Build a POD basis from snapshots, reduce-solve every sample, and distill."""
+    snapshot_inputs = inputs[: method.snapshots]
+    starts = sampling.sample(method.unknown_domain, snapshot_inputs.shape[0], seed=0)
+    step = _newton_step_matrix_free if method.matrix_free else _newton_step
+    states = _solve_independently_with(
+        step, residual, snapshot_inputs, starts, method.newton_steps
+    )
+    center, basis = _pod_basis(states, method.rank)
+
+    def reduced_solve(x: Float[Array, " n"]) -> Float[Array, " r"]:
+        latent = jnp.zeros(method.rank)
+        for _ in range(method.reduced_steps):
+            latent = _reduced_newton_step(residual, x, latent, center, basis)
+        return latent
+
+    latents = jax.vmap(reduced_solve)(inputs)
+    projection = reduction.LinearReduction(
+        encode_matrix=basis,
+        encode_bias=-basis @ center,
+        decode_matrix=basis.T,
+        decode_bias=center,
+    )
+    return _distill_latent_map(inputs, latents, projection, method.form, holdout, ridge)
+
+
+def _distill_latent_map(
+    inputs: Float[Array, "n d"],
+    latents: Float[Array, "n r"],
+    projection: reduction.LinearReduction,
+    form: LinearForm,
+    holdout: float,
+    ridge: float,
+) -> FittedSurrogate:
+    """Fit the input-to-latent map and decode through the POD projection."""
+    holdout_count = max(1, round(inputs.shape[0] * holdout))
+    train_inputs, holdout_inputs = inputs[:-holdout_count], inputs[-holdout_count:]
+    train_latents, holdout_latents = latents[:-holdout_count], latents[-holdout_count:]
+
+    input_normalizer = normalize.from_moments(train_inputs)
+    latent_normalizer = normalize.from_moments(train_latents)
+    normalized_inputs = jax.vmap(input_normalizer.forward)(train_inputs)
+    normalized_latents = jax.vmap(latent_normalizer.forward)(train_latents)
+    model = fit_linear(form, normalized_inputs, normalized_latents, ridge=ridge)
+    _, output_unravel = ravel_example(projection.inverse(train_latents[0]))
+
+    surrogate = FittedSurrogate(
+        input_reduction=reduction.identity(inputs.shape[1]),
+        input_normalizer=input_normalizer,
+        model=model,
+        output_normalizer=latent_normalizer,
+        output_reduction=projection,
+        output_unravel=output_unravel,
+        domain=box_from_data(inputs),
+        report=_zero_report(inputs.shape[1]),
+    )
+    # Score the distilled map against the reduced solver in the latent space.
+    predicted = jax.vmap(lambda x: latent_normalizer.inverse(model(input_normalizer.forward(x))))(
+        holdout_inputs
+    )
+    residual = jnp.linalg.norm(predicted - holdout_latents, axis=1)
+    report = _value_report(
+        jnp.mean(residual), jnp.max(residual), inputs.shape[1], model.weights.shape[1]
+    )
+    return eqx.tree_at(lambda s: s.report, surrogate, report)
+
+
 def _fit_inverse_map(
     residual: Residual,
     inputs: Float[Array, "n d"],
@@ -436,7 +565,7 @@ def _fit_objective(
 def fit_implicit(
     residual: Residual,
     domain: Domain,
-    method: InverseMap | Objective | ExactSolve,
+    method: InverseMap | Objective | ExactSolve | ReducedSolve,
     *,
     samples: int = 512,
     holdout: float = 0.2,
@@ -464,6 +593,8 @@ def fit_implicit(
             base = _fit_objective(residual, domain, train_inputs, method)
         case ExactSolve():
             base = _fit_exact_solve(residual, train_inputs, method, holdout, ridge)
+        case ReducedSolve():
+            base = _fit_reduced_order(residual, train_inputs, method, holdout, ridge)
         case _:
             raise TypeError(f"unsupported implicit method: {type(method).__name__}")
 

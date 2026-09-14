@@ -218,6 +218,49 @@ def test_exact_solve_dense_route_agrees_with_matrix_free() -> None:
     assert float(dense.report.value_mean) < 1e-3
 
 
+def _linear_diffusion(x: jax.Array, y: jax.Array) -> jax.Array:
+    laplacian = -2.0 * y + jnp.roll(y, 1) + jnp.roll(y, -1)
+    return -laplacian + 0.5 * y - x @ _SHAPES
+
+
+def test_reduced_order_fits_from_few_snapshots() -> None:
+    domain = sx.box([-1.0, -1.0, -1.0], [1.0, 1.0, 1.0])
+    # Only 16 full solves build the basis, then every sample is reduce-solved.
+    method = sx.ReducedSolve(
+        form=sx.Affine(),
+        unknown_domain=sx.box([-3.0] * 64, [3.0] * 64),
+        rank=3,
+        snapshots=16,
+        newton_steps=5,
+        reduced_steps=5,
+    )
+    surrogate = sx.fit_implicit(_linear_diffusion, domain, method, samples=128)
+    assert surrogate.output_reduction.decode_matrix.shape == (64, 3)
+    assert float(surrogate.report.value_mean) < 1e-3
+
+
+def test_reduced_order_latent_dimension_tracks_the_manifold() -> None:
+    domain = sx.box([-1.0, -1.0, -1.0], [1.0, 1.0, 1.0])
+    unknown_domain = sx.box([-3.0] * 64, [3.0] * 64)
+
+    def fit_with_rank(rank: int) -> float:
+        method = sx.ReducedSolve(
+            form=sx.Affine(),
+            unknown_domain=unknown_domain,
+            rank=rank,
+            snapshots=16,
+            newton_steps=5,
+            reduced_steps=5,
+            matrix_free=False,
+        )
+        surrogate = sx.fit_implicit(_linear_diffusion, domain, method, samples=128)
+        return float(surrogate.report.value_mean)
+
+    # The manifold is rank 3, so too few directions leave a large residual.
+    assert fit_with_rank(1) > fit_with_rank(3)
+    assert fit_with_rank(3) < 1e-3
+
+
 def test_implicit_surrogate_survives_jit_vmap_and_grad() -> None:
     def residual(x: jax.Array, y: jax.Array) -> jax.Array:
         return y - 2.0 * x

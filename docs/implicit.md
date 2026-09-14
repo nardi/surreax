@@ -235,6 +235,48 @@ assert surrogate.output_reduction.encode_matrix.shape[0] == 3
 assert float(surrogate.report.value_mean) < 1e-3
 ```
 
+## The reduced-order model
+
+`ExactSolve` solves the full residual once per sample. When many samples are
+needed, or the solve is to be reused online, `ReducedSolve` solves in a small
+latent space instead. It builds a proper orthogonal decomposition basis from a
+few solved snapshots, projects the residual onto that basis in the manner of
+Galerkin, and solves the reduced residual by Newton in the latent. Each reduced
+step is an `r` by `r` solve, independent of the unknown size. It then distills
+the input-to-latent map into an explicit surrogate, so inference needs no solve.
+This is the non-intrusive reduced-order model, POD-NN, of Hesthaven and Ubbiali,
+[POD-NN](https://doi.org/10.1016/j.jcp.2018.02.037).
+
+The basis is linear here, which suits a solution manifold whose Kolmogorov
+n-width decays fast. A strongly nonlinear manifold needs a nonlinear autoencoder
+basis, which is not built yet. The latent dimension is the `rank`, and the
+residual falls as it reaches the intrinsic dimension of the manifold.
+
+<!-- name: test_implicit_reduced_order -->
+```python
+import jax.numpy as jnp
+import surreax as sx
+
+grid = jnp.linspace(0.0, 1.0, 64)
+shapes = jnp.stack([jnp.sin(jnp.pi * grid), jnp.sin(2 * jnp.pi * grid), grid * (1 - grid)])
+
+
+def residual(x, y):
+    laplacian = -2.0 * y + jnp.roll(y, 1) + jnp.roll(y, -1)
+    return -laplacian + 0.5 * y - x @ shapes
+
+
+domain = sx.box([-1.0, -1.0, -1.0], [1.0, 1.0, 1.0])
+# Only 16 full solves build the basis, then every sample is reduce-solved.
+method = sx.ReducedSolve(
+    form=sx.Affine(), unknown_domain=sx.box([-3.0] * 64, [3.0] * 64), rank=3, snapshots=16
+)
+surrogate = sx.fit_implicit(residual, domain, method, samples=128)
+
+assert surrogate.output_reduction.decode_matrix.shape == (64, 3)
+assert float(surrogate.report.value_mean) < 1e-3
+```
+
 ## The objective route
 
 There is also an experimental route that never inverts anything. It fits `f`

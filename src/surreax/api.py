@@ -13,7 +13,7 @@ import jax
 import jax.numpy as jnp
 from jaxtyping import Array, Float, PyTree
 
-from surreax import normalize, reduction, sampling
+from surreax import normalize, reduction, sampling, strategy
 from surreax.domain import Domain
 from surreax.error_search import high_error_points, worst_case
 from surreax.fitted import FittedSurrogate
@@ -122,7 +122,7 @@ def _error_report(
 def fit(
     target: Target,
     domain: Domain,
-    form: LinearForm | MaxAffineForm | DifferenceOfMaxAffineForm | NetworkForm,
+    form: LinearForm | MaxAffineForm | DifferenceOfMaxAffineForm | NetworkForm | None = None,
     *,
     samples: int = 512,
     holdout: float = 0.2,
@@ -149,8 +149,12 @@ def fit(
     space. The report's worst-case error is searched from `worst_case_starts`
     random points, and setting that to zero skips the search. Passing `inputs`
     fits on those flat points instead of sampling the domain, which is how
-    adaptive sampling refits on a growing set.
+    adaptive sampling refits on a growing set. Leaving `form` out picks one from
+    the target's function kind, affine, polynomial, piecewise linear, or a
+    network for a discontinuity.
     """
+    if form is None:
+        form = strategy.recommend_form(target, domain, samples=samples, seed=seed)
     if inputs is None:
         inputs = sampling.sample(domain, samples, seed=seed)
     holdout_count = max(1, round(inputs.shape[0] * holdout))

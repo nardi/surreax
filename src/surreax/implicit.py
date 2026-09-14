@@ -24,11 +24,12 @@ import optax
 import optimistix as optx
 from jaxtyping import Array, Bool, Float
 
-from surreax import normalize, reduction, sampling
+from surreax import normalize, reduction, sampling, strategy
 from surreax.domain import Domain, box_from_data
 from surreax.fitted import FittedSurrogate
 from surreax.fitting import LinearModel, fit_linear
 from surreax.flatten import ravel_example
+from surreax.forms import Affine, ChebyshevPolynomial
 from surreax.forms.protocol import LinearForm
 from surreax.report import ErrorReport
 
@@ -37,6 +38,10 @@ Residual = Callable[[Float[Array, " n"], Float[Array, " m"]], Float[Array, " m"]
 
 Surrogate = Callable[[Float[Array, " n"]], Float[Array, " m"]]
 """Any approximator of the target, from a flat input to the unknown."""
+
+_START_SEED = 104729
+"""Seed for the unknown starts, distinct from the input seed so the residual
+coordinate does not come out collinear with the input."""
 
 
 def _zero_report(dimension: int) -> ErrorReport:
@@ -324,7 +329,7 @@ def _fit_exact_solve(
     ridge: float,
 ) -> FittedSurrogate:
     """Solve the residual for every sample, then fit the reduced output map."""
-    starts = sampling.sample(method.unknown_domain, inputs.shape[0], seed=0)
+    starts = sampling.sample(method.unknown_domain, inputs.shape[0], seed=_START_SEED)
     step = _newton_step_matrix_free if method.matrix_free else _newton_step
     unknowns = _solve_independently_with(step, residual, inputs, starts, method.newton_steps)
     return fit_data(
@@ -416,7 +421,7 @@ def _fit_reduced_order(
 ) -> FittedSurrogate:
     """Build a POD basis from snapshots, reduce-solve every sample, and distill."""
     snapshot_inputs = inputs[: method.snapshots]
-    starts = sampling.sample(method.unknown_domain, snapshot_inputs.shape[0], seed=0)
+    starts = sampling.sample(method.unknown_domain, snapshot_inputs.shape[0], seed=_START_SEED)
     step = _newton_step_matrix_free if method.matrix_free else _newton_step
     states = _solve_independently_with(
         step, residual, snapshot_inputs, starts, method.newton_steps
@@ -493,7 +498,7 @@ def _fit_inverse_map(
     determinant comes for free and drives both the branch filter and the fold
     flag.
     """
-    starts = sampling.sample(method.unknown_domain, inputs.shape[0], seed=0)
+    starts = sampling.sample(method.unknown_domain, inputs.shape[0], seed=_START_SEED)
     solve = _solve_by_continuation if method.continuation else _solve_independently
     unknowns = solve(residual, inputs, starts, method.newton_steps)
 
@@ -562,11 +567,39 @@ def _fit_objective(
     )
 
 
+def recommend_method(
+    residual: Residual,
+    domain: Domain,
+    unknown_domain: Domain,
+    *,
+    samples: int = 128,
+    seed: int = 0,
+) -> InverseMap | ExactSolve:
+    """Pick an implicit method from the residual's structure.
+
+    A large unknown goes to `ExactSolve`, which reduces the state. A small one
+    goes to `InverseMap`, exact with no iteration when the residual is affine in
+    the unknown, and a polynomial inverse with Newton steps otherwise.
+    """
+    affine = strategy.residual_is_affine_in_unknown(
+        residual, domain, unknown_domain, samples=samples, seed=seed
+    )
+    if unknown_domain.dimension > 32:
+        form: LinearForm = Affine() if affine else ChebyshevPolynomial(degree=2)
+        return ExactSolve(form=form, unknown_domain=unknown_domain)
+    if affine:
+        return InverseMap(form=Affine(), unknown_domain=unknown_domain, newton_steps=1)
+    return InverseMap(
+        form=ChebyshevPolynomial(degree=3), unknown_domain=unknown_domain, newton_steps=3
+    )
+
+
 def fit_implicit(
     residual: Residual,
     domain: Domain,
-    method: InverseMap | Objective | ExactSolve | ReducedSolve,
+    method: InverseMap | Objective | ExactSolve | ReducedSolve | None = None,
     *,
+    unknown_domain: Domain | None = None,
     samples: int = 512,
     holdout: float = 0.2,
     ridge: float = 1e-8,
@@ -578,8 +611,14 @@ def fit_implicit(
     Samples the domain, builds the surrogate through the strategy `method`, and
     reports the residual the surrogate leaves on held-out inputs. A positive
     `refine_steps` polishes each prediction with Newton steps on the residual at
-    call time, which every method's result can use.
+    call time, which every method's result can use. Leaving `method` out picks
+    one from the residual's structure, which needs `unknown_domain`.
     """
+    if method is None:
+        if unknown_domain is None:
+            raise ValueError("fit_implicit needs a method or an unknown_domain to recommend one")
+        method = recommend_method(residual, domain, unknown_domain, seed=seed)
+
     inputs = sampling.sample(domain, samples, seed=seed)
     holdout_count = max(1, round(samples * holdout))
     train_inputs, holdout_inputs = inputs[:-holdout_count], inputs[-holdout_count:]

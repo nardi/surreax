@@ -32,11 +32,13 @@ from surreax.implicit import (
     Residual,
     fit_data,
     fit_implicit,
+    recommend_method,
     refine,
     root_find,
 )
 from surreax.reduction import active_subspace_inputs, pca_inputs, pca_outputs
 from surreax.report import ErrorReport
+from surreax.strategy import function_kinds, recommend_block_forms, recommend_form
 from surreax.structure import Structure, analyze, prune_inputs
 
 __all__ = [
@@ -78,9 +80,13 @@ __all__ = [
     "fit_data",
     "fit_implicit",
     "fit_separable",
+    "function_kinds",
     "pca_inputs",
     "pca_outputs",
     "prune_inputs",
+    "recommend_block_forms",
+    "recommend_form",
+    "recommend_method",
     "refine",
     "root_find",
 ]

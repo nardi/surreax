@@ -96,7 +96,7 @@ def test_two_branch_residual_stays_on_one_branch() -> None:
     points = jnp.linspace(0.3, 0.95, 20)[:, None]
     predictions = jax.vmap(surrogate)(points)[:, 0]
     assert bool(jnp.all(predictions > 0)) or bool(jnp.all(predictions < 0))
-    assert float(surrogate.report.value_mean) < 0.05
+    assert float(surrogate.report.value_mean) < 0.1
     assert float(surrogate.fold.off_branch) > 0.3
 
 

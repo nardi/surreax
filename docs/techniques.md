@@ -233,3 +233,33 @@ assert jnp.allclose(surrogate(point), target(point), atol=1e-2)
 # The report bounds the error from any coupling dropped between blocks.
 assert float(surrogate.report.projection_max) < 1e-5
 ```
+
+## Automatic strategy selection
+
+The structural analysis can also choose the form for you. Leaving the form out of
+`fit` reads the function kind of each output, affine, polynomial, piecewise
+linear, or discontinuous, and picks a form to match. It is advisory and always
+overridable, so pass a form to override it.
+
+<!-- name: test_techniques_auto_form -->
+```python
+import jax.numpy as jnp
+import surreax as sx
+
+
+def target(x):
+    return jnp.array([x[0] ** 2 - 2 * x[0] * x[1]])
+
+
+domain = sx.box([-1.0, -1.0], [1.0, 1.0])
+# No form given, so a polynomial form is chosen from the detected kind.
+surrogate = sx.fit(target, domain, samples=256)
+assert float(surrogate.report.value_max) < 1e-3
+```
+
+`fit_separable` chooses a form per block the same way when the form is omitted, so
+a target that is linear in one block and nonlinear in another gets a linear form
+on the first and a richer form on the second. `fit_implicit` chooses a method
+from the residual, an inverse map for a small unknown and a reducing solve for a
+large one, when you pass an `unknown_domain` and no method. You can inspect the
+reading directly with `function_kinds`, `recommend_form`, and `recommend_method`.

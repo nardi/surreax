@@ -75,7 +75,7 @@ def _coupling_bound(
 def fit_separable(
     target: Target,
     domain: Domain,
-    form: Form | Sequence[Form],
+    form: Form | Sequence[Form] | None = None,
     *,
     samples: int = 512,
     holdout: float = 0.2,
@@ -91,20 +91,25 @@ def fit_separable(
 
     `form` is one form for every block, or a sequence of forms, one per block in
     sorted-label order, so a linear block can take a closed-form fit and a
-    nonlinear one a richer form.
+    nonlinear one a richer form. Leaving it out picks a form per block from that
+    block's function kind.
     """
     from surreax.api import fit
+    from surreax.strategy import recommend_block_forms
 
     structure = analyze(target, domain, samples=samples, tolerance=tolerance, seed=seed)
     input_block = np.asarray(structure.input_block)
     output_block = np.asarray(structure.output_block)
     labels = np.unique(output_block)
+    if form is None:
+        block_forms: list[Form] = recommend_block_forms(
+            target, domain, samples=samples, tolerance=tolerance, seed=seed
+        )
     # The runtime `Sequence` check drops the element type, so restore it.
-    block_forms = (
-        list(cast("Sequence[Form]", form))
-        if isinstance(form, Sequence)
-        else [form] * labels.shape[0]
-    )
+    elif isinstance(form, Sequence):
+        block_forms = list(cast("Sequence[Form]", form))
+    else:
+        block_forms = [form] * labels.shape[0]
     lower, upper = domain.bounds()
     lower_np, upper_np = np.asarray(lower), np.asarray(upper)
 

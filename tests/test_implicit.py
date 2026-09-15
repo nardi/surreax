@@ -4,7 +4,12 @@ import jax
 import jax.numpy as jnp
 
 import surreax as sx
-from surreax.implicit import _newton_step, _newton_step_matrix_free, _solve_independently
+from surreax.implicit import (
+    _latent_newton,
+    _newton_step,
+    _newton_step_matrix_free,
+    _solve_independently,
+)
 
 
 def test_affine_in_the_unknown_is_recovered_exactly() -> None:
@@ -259,6 +264,104 @@ def test_reduced_order_latent_dimension_tracks_the_manifold() -> None:
     # The manifold is rank 3, so too few directions leave a large residual.
     assert fit_with_rank(1) > fit_with_rank(3)
     assert fit_with_rank(3) < 1e-3
+
+
+_ROM_GRID = jnp.linspace(0.0, 1.0, 32)
+_ROM_MODES = jnp.stack(
+    [
+        jnp.sin(2 * jnp.pi * _ROM_GRID),
+        jnp.cos(2 * jnp.pi * _ROM_GRID),
+        jnp.sin(4 * jnp.pi * _ROM_GRID),
+        jnp.cos(4 * jnp.pi * _ROM_GRID),
+    ]
+)
+_ROM_XDOMAIN = sx.box([-1.0] * 4, [1.0] * 4)
+_ROM_YDOMAIN = sx.box([-2.0] * 32, [2.0] * 32)
+
+
+def _rom_linear(x: jax.Array, y: jax.Array) -> jax.Array:
+    laplacian = -2.0 * y + jnp.roll(y, 1) + jnp.roll(y, -1)
+    return -laplacian + 0.5 * y - x @ _ROM_MODES
+
+
+def _rom_cubic(x: jax.Array, y: jax.Array) -> jax.Array:
+    laplacian = -2.0 * y + jnp.roll(y, 1) + jnp.roll(y, -1)
+    return -laplacian + 0.5 * y + 0.3 * y**3 - x @ _ROM_MODES
+
+
+def _rom_bistable(x: jax.Array, y: jax.Array) -> jax.Array:
+    # A loop gain above one gives two stable states, so the reduced solve is
+    # multivalued and ill-conditioned between them.
+    return y - jnp.tanh(3.0 * y) - 0.3 * (x @ _ROM_MODES)
+
+
+def _rom_method(**overrides: object) -> sx.ReducedSolve:
+    settings: dict[str, object] = {
+        "form": sx.Affine(),
+        "unknown_domain": _ROM_YDOMAIN,
+        "rank": 4,
+        "snapshots": 16,
+        "newton_steps": 10,
+        "reduced_steps": 12,
+        "matrix_free": False,
+    }
+    settings.update(overrides)
+    return sx.ReducedSolve(**settings)  # type: ignore[arg-type]
+
+
+def test_reduced_solver_derivative_matches_the_reference() -> None:
+    solver = sx.reduced_solver(_rom_linear, _ROM_XDOMAIN, _rom_method(), samples=64)
+    point = jnp.array([0.5, -0.3, 0.7, 0.1])
+    implicit_jacobian = jax.jacobian(solver.latent)(point)
+
+    # The unrolled Newton is the reference the implicit derivative should match.
+    def unrolled(x: jax.Array) -> jax.Array:
+        return _latent_newton(_rom_linear, x, jnp.zeros(4), solver.center, solver.basis, 12)
+
+    assert jnp.allclose(implicit_jacobian, jax.jacobian(unrolled)(point), atol=1e-4)
+
+    # And a central difference, to a looser tolerance.
+    eps = 1e-4
+    finite = jnp.stack(
+        [(solver.latent(point.at[i].add(eps)) - solver.latent(point.at[i].add(-eps))) / (2 * eps)
+         for i in range(4)],
+        axis=1,
+    )
+    assert jnp.allclose(implicit_jacobian, finite, atol=1e-2)
+
+
+def test_reduced_solver_reports_good_conditioning_on_one_root() -> None:
+    solver = sx.reduced_solver(_rom_linear, _ROM_XDOMAIN, _rom_method(), samples=64)
+    assert not solver.report.multiple_roots
+    assert float(solver.report.min_conditioning) > 0.1
+
+
+def test_reduced_solver_flags_multiple_roots_and_ill_conditioning() -> None:
+    solver = sx.reduced_solver(
+        _rom_bistable, _ROM_XDOMAIN, _rom_method(reduced_steps=15), samples=64
+    )
+    assert solver.report.multiple_roots
+    assert float(solver.report.min_conditioning) < 0.1
+
+
+def test_derivative_supervision_lowers_the_jacobian_error() -> None:
+    solver = sx.reduced_solver(_rom_cubic, _ROM_XDOMAIN, _rom_method(), samples=64)
+    points = jax.random.uniform(jax.random.key(3), (15, 4), minval=-1.0, maxval=1.0)
+
+    def jacobian_error(surrogate: sx.FittedSurrogate) -> float:
+        errors = jax.vmap(
+            lambda x: jnp.linalg.norm(jax.jacobian(surrogate)(x) - jax.jacobian(solver)(x))
+        )(points)
+        return float(jnp.mean(errors))
+
+    # A high-degree fit on few samples gets the value right but the slope wrong,
+    # which the solver's own Jacobian corrects.
+    form = sx.ChebyshevPolynomial(degree=3)
+    plain = sx.fit_implicit(_rom_cubic, _ROM_XDOMAIN, _rom_method(form=form), samples=40)
+    supervised = sx.fit_implicit(
+        _rom_cubic, _ROM_XDOMAIN, _rom_method(form=form, derivative_weight=1.0), samples=40
+    )
+    assert jacobian_error(supervised) < jacobian_error(plain) / 2
 
 
 def test_implicit_surrogate_survives_jit_vmap_and_grad() -> None:

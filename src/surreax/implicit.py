@@ -14,6 +14,7 @@ directly by minimizing the residual it leaves.
 """
 
 from collections.abc import Callable
+from functools import partial
 
 import equinox as eqx
 import jax
@@ -27,7 +28,7 @@ from jaxtyping import Array, Bool, Float
 from surreax import normalize, reduction, sampling, strategy
 from surreax.domain import Domain, box_from_data
 from surreax.fitted import FittedSurrogate
-from surreax.fitting import LinearModel, fit_linear
+from surreax.fitting import LinearModel, fit_linear, fit_linear_sobolev
 from surreax.flatten import ravel_example
 from surreax.forms import Affine, ChebyshevPolynomial
 from surreax.forms.protocol import LinearForm
@@ -380,6 +381,26 @@ class ReducedSolve(eqx.Module):
     newton_steps: int = eqx.field(static=True, default=8)
     reduced_steps: int = eqx.field(static=True, default=8)
     matrix_free: bool = eqx.field(static=True, default=True)
+    derivative_weight: float = eqx.field(static=True, default=0.0)
+
+
+class LatentReport(eqx.Module):
+    """How trustworthy the reduced solve is over the samples.
+
+    A reduced residual can have several latent roots, and its latent Jacobian can
+    turn singular near a fold, so the reduced solve is reported rather than
+    trusted blindly.
+    """
+
+    min_conditioning: Float[Array, ""]
+    """Smallest reciprocal condition number of the latent Jacobian over the
+    samples, near zero where the reduced problem is ill-conditioned."""
+
+    boundary_point: Float[Array, " d"]
+    """Flat input where that worst conditioning occurs."""
+
+    multiple_roots: bool = eqx.field(static=True)
+    """Whether a second start reached a different latent root on some sample."""
 
 
 def _pod_basis(
@@ -391,6 +412,17 @@ def _pod_basis(
     return center, directions[:rank]
 
 
+def _reduced_residual(
+    residual: Residual,
+    x: Float[Array, " n"],
+    z: Float[Array, " r"],
+    center: Float[Array, " m"],
+    basis: Float[Array, "r m"],
+) -> Float[Array, " r"]:
+    """The Galerkin projection of the residual, `basis @ g(x, center + basis.T z)`."""
+    return basis @ residual(x, center + basis.T @ z)
+
+
 def _reduced_newton_step(
     residual: Residual,
     x: Float[Array, " n"],
@@ -398,18 +430,160 @@ def _reduced_newton_step(
     center: Float[Array, " m"],
     basis: Float[Array, "r m"],
 ) -> Float[Array, " r"]:
-    """One Newton step on the Galerkin-projected residual in the latent.
+    """One Newton step on the reduced residual, an `r` by `r` solve in the latent."""
 
-    The reduced residual is `basis @ g(x, center + basis.T @ z)`, so its Jacobian
-    is the `r` by `r` matrix `basis @ (dg/dy) @ basis.T`, small regardless of the
-    unknown size.
+    def reduced(latent: Float[Array, " r"]) -> Float[Array, " r"]:
+        return _reduced_residual(residual, x, latent, center, basis)
+
+    return z - jnp.linalg.solve(jax.jacobian(reduced)(z), reduced(z))
+
+
+def _latent_newton(
+    residual: Residual,
+    x: Float[Array, " n"],
+    start: Float[Array, " r"],
+    center: Float[Array, " m"],
+    basis: Float[Array, "r m"],
+    steps: int,
+) -> Float[Array, " r"]:
+    """Run the reduced Newton from a start, without implicit differentiation."""
+    latent = start
+    for _ in range(steps):
+        latent = _reduced_newton_step(residual, x, latent, center, basis)
+    return latent
+
+
+@partial(jax.custom_jvp, nondiff_argnums=(0, 4))
+def _reduced_root(
+    residual: Residual,
+    x: Float[Array, " n"],
+    center: Float[Array, " m"],
+    basis: Float[Array, "r m"],
+    steps: int,
+) -> Float[Array, " r"]:
+    """Solve the reduced residual for the latent by Newton from zero."""
+    return _latent_newton(residual, x, jnp.zeros(basis.shape[0]), center, basis, steps)
+
+
+@_reduced_root.defjvp
+def _reduced_root_jvp(
+    residual: Residual,
+    steps: int,
+    primals: tuple[Float[Array, " n"], Float[Array, " m"], Float[Array, "r m"]],
+    tangents: tuple[Float[Array, " n"], Float[Array, " m"], Float[Array, "r m"]],
+) -> tuple[Float[Array, " r"], Float[Array, " r"]]:
+    """Differentiate the reduced solve by the implicit function theorem.
+
+    At the root the reduced residual `p` is zero, so its total derivative gives
+    `dz = -(dp/dz)^{-1} p_dot`, where `p_dot` is the change in `p` at fixed `z`.
+    This is exact and avoids differentiating the Newton iterates.
+    """
+    x, center, basis = primals
+    z = _reduced_root(residual, x, center, basis, steps)
+    latent_jacobian = jax.jacobian(
+        lambda latent: _reduced_residual(residual, x, latent, center, basis)
+    )(z)
+    _, p_dot = jax.jvp(
+        lambda a, b, c: _reduced_residual(residual, a, z, b, c), primals, tangents
+    )
+    return z, -jnp.linalg.solve(latent_jacobian, p_dot)
+
+
+class ReducedSolver(eqx.Module):
+    """The reduced-order solver, a cheap differentiable oracle for the target.
+
+    A call solves the Galerkin-projected residual in the latent by Newton, an `r`
+    by `r` solve independent of the unknown size, and decodes to the full field.
+    Its input derivative comes from the implicit function theorem rather than
+    differentiating the Newton iterates. `report` records where the reduced
+    problem is ill-conditioned or has several roots.
     """
 
-    def reduced_residual(latent: Float[Array, " r"]) -> Float[Array, " r"]:
-        return basis @ residual(x, center + basis.T @ latent)
+    center: Float[Array, " m"]
+    basis: Float[Array, "r m"]
+    report: LatentReport
+    residual: Residual = eqx.field(static=True)
+    reduced_steps: int = eqx.field(static=True)
 
-    jacobian = jax.jacobian(reduced_residual)(z)
-    return z - jnp.linalg.solve(jacobian, reduced_residual(z))
+    def latent(self, x: Float[Array, " n"]) -> Float[Array, " r"]:
+        """Solve the reduced residual for the latent at `x`."""
+        return _reduced_root(self.residual, x, self.center, self.basis, self.reduced_steps)
+
+    def __call__(self, x: Float[Array, " n"]) -> Float[Array, " m"]:
+        return self.center + self.basis.T @ self.latent(x)
+
+
+def _latent_report(
+    residual: Residual,
+    inputs: Float[Array, "n d"],
+    center: Float[Array, " m"],
+    basis: Float[Array, "r m"],
+    steps: int,
+) -> LatentReport:
+    """Read the conditioning and root multiplicity of the reduced solve."""
+    zeros_start = jnp.zeros(basis.shape[0])
+
+    def solve_from(start: Float[Array, " r"], x: Float[Array, " n"]) -> Float[Array, " r"]:
+        return _latent_newton(residual, x, start, center, basis, steps)
+
+    latents = jax.vmap(lambda x: solve_from(zeros_start, x))(inputs)
+
+    def conditioning(x: Float[Array, " n"], z: Float[Array, " r"]) -> Float[Array, ""]:
+        def reduced(latent: Float[Array, " r"]) -> Float[Array, " r"]:
+            return _reduced_residual(residual, x, latent, center, basis)
+
+        singular = jnp.linalg.svd(jax.jacobian(reduced)(z), compute_uv=False)
+        return singular[-1] / singular[0]
+
+    conditions = jax.vmap(conditioning)(inputs, latents)
+    worst = jnp.argmin(conditions)
+
+    # A second start on a different root shows the reduced problem is multivalued.
+    alternate = jax.vmap(lambda x: solve_from(zeros_start + 1.0, x))(inputs)
+    spread = jnp.max(jnp.linalg.norm(latents - alternate, axis=1))
+    return LatentReport(
+        min_conditioning=conditions[worst],
+        boundary_point=inputs[worst],
+        multiple_roots=bool(spread > 1e-3),
+    )
+
+
+def _build_reduced_solver(
+    residual: Residual, snapshot_inputs: Float[Array, "s d"], method: ReducedSolve
+) -> ReducedSolver:
+    """Solve the snapshots, take the POD basis, and read the latent report."""
+    starts = sampling.sample(method.unknown_domain, snapshot_inputs.shape[0], seed=_START_SEED)
+    step = _newton_step_matrix_free if method.matrix_free else _newton_step
+    states = _solve_independently_with(
+        step, residual, snapshot_inputs, starts, method.newton_steps
+    )
+    center, basis = _pod_basis(states, method.rank)
+    report = _latent_report(residual, snapshot_inputs, center, basis, method.reduced_steps)
+    return ReducedSolver(
+        center=center,
+        basis=basis,
+        report=report,
+        residual=residual,
+        reduced_steps=method.reduced_steps,
+    )
+
+
+def reduced_solver(
+    residual: Residual,
+    domain: Domain,
+    method: ReducedSolve,
+    *,
+    samples: int = 128,
+    seed: int = 0,
+) -> ReducedSolver:
+    """Build the reduced-order solver for a residual over a domain.
+
+    Samples the domain for the snapshots, builds the basis, and returns the
+    solver on its own, so a caller has the cheap latent solve and its derivative
+    without the distilled surrogate.
+    """
+    inputs = sampling.sample(domain, samples, seed=seed)
+    return _build_reduced_solver(residual, inputs[: method.snapshots], method)
 
 
 def _fit_reduced_order(
@@ -419,40 +593,36 @@ def _fit_reduced_order(
     holdout: float,
     ridge: float,
 ) -> FittedSurrogate:
-    """Build a POD basis from snapshots, reduce-solve every sample, and distill."""
-    snapshot_inputs = inputs[: method.snapshots]
-    starts = sampling.sample(method.unknown_domain, snapshot_inputs.shape[0], seed=_START_SEED)
-    step = _newton_step_matrix_free if method.matrix_free else _newton_step
-    states = _solve_independently_with(
-        step, residual, snapshot_inputs, starts, method.newton_steps
-    )
-    center, basis = _pod_basis(states, method.rank)
-
-    def reduced_solve(x: Float[Array, " n"]) -> Float[Array, " r"]:
-        latent = jnp.zeros(method.rank)
-        for _ in range(method.reduced_steps):
-            latent = _reduced_newton_step(residual, x, latent, center, basis)
-        return latent
-
-    latents = jax.vmap(reduced_solve)(inputs)
+    """Build the reduced solver, reduce-solve every sample, and distill."""
+    solver = _build_reduced_solver(residual, inputs[: method.snapshots], method)
+    latents = jax.vmap(solver.latent)(inputs)
     projection = reduction.LinearReduction(
-        encode_matrix=basis,
-        encode_bias=-basis @ center,
-        decode_matrix=basis.T,
-        decode_bias=center,
+        encode_matrix=solver.basis,
+        encode_bias=-solver.basis @ solver.center,
+        decode_matrix=solver.basis.T,
+        decode_bias=solver.center,
     )
-    return _distill_latent_map(inputs, latents, projection, method.form, holdout, ridge)
+    return _distill_latent_map(
+        solver, inputs, latents, projection, method.form, holdout, ridge, method.derivative_weight
+    )
 
 
 def _distill_latent_map(
+    solver: ReducedSolver,
     inputs: Float[Array, "n d"],
     latents: Float[Array, "n r"],
     projection: reduction.LinearReduction,
     form: LinearForm,
     holdout: float,
     ridge: float,
+    derivative_weight: float,
 ) -> FittedSurrogate:
-    """Fit the input-to-latent map and decode through the POD projection."""
+    """Fit the input-to-latent map and decode through the POD projection.
+
+    A positive `derivative_weight` supervises the map's Jacobian with the solver's
+    own, taken through the implicit function theorem, so the distilled map matches
+    the solver's slope as well as its value.
+    """
     holdout_count = max(1, round(inputs.shape[0] * holdout))
     train_inputs, holdout_inputs = inputs[:-holdout_count], inputs[-holdout_count:]
     train_latents, holdout_latents = latents[:-holdout_count], latents[-holdout_count:]
@@ -461,7 +631,20 @@ def _distill_latent_map(
     latent_normalizer = normalize.from_moments(train_latents)
     normalized_inputs = jax.vmap(input_normalizer.forward)(train_inputs)
     normalized_latents = jax.vmap(latent_normalizer.forward)(train_latents)
-    model = fit_linear(form, normalized_inputs, normalized_latents, ridge=ridge)
+    if derivative_weight > 0.0:
+        # Rescale the solver Jacobian into the normalized input and latent frame.
+        raw = jax.vmap(jax.jacobian(solver.latent))(train_inputs)
+        scale = input_normalizer.scale[None, None, :] / latent_normalizer.scale[None, :, None]
+        model = fit_linear_sobolev(
+            form,
+            normalized_inputs,
+            normalized_latents,
+            raw * scale,
+            ridge=ridge,
+            derivative_weight=derivative_weight,
+        )
+    else:
+        model = fit_linear(form, normalized_inputs, normalized_latents, ridge=ridge)
     _, output_unravel = ravel_example(projection.inverse(train_latents[0]))
 
     surrogate = FittedSurrogate(

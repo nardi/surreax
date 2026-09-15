@@ -279,6 +279,45 @@ assert surrogate.output_reduction.decode_matrix.shape == (64, 3)
 assert float(surrogate.report.value_mean) < 1e-3
 ```
 
+### The reduced solver on its own
+
+`reduced_solver` returns the solver rather than the distilled map, so you have the
+cheap latent solve and its exact input derivative without a fit. The derivative
+comes through the implicit function theorem, not by differentiating the Newton
+steps, so it is exact and cheap. The solver's `report` says where the reduced
+problem is ill-conditioned or has several latent roots, so an untrustworthy solve
+is flagged rather than returned in silence.
+
+<!-- name: test_implicit_reduced_solver -->
+```python
+import jax
+import jax.numpy as jnp
+import surreax as sx
+
+grid = jnp.linspace(0.0, 1.0, 64)
+shapes = jnp.stack([jnp.sin(jnp.pi * grid), jnp.sin(2 * jnp.pi * grid), grid * (1 - grid)])
+
+
+def residual(x, y):
+    laplacian = -2.0 * y + jnp.roll(y, 1) + jnp.roll(y, -1)
+    return -laplacian + 0.5 * y - x @ shapes
+
+
+domain = sx.box([-1.0, -1.0, -1.0], [1.0, 1.0, 1.0])
+method = sx.ReducedSolve(
+    form=sx.Affine(), unknown_domain=sx.box([-3.0] * 64, [3.0] * 64), rank=3, snapshots=16
+)
+solver = sx.reduced_solver(residual, domain, method, samples=64)
+
+point = jnp.array([0.4, -0.2, 0.6])
+field = solver(point)
+assert field.shape == (64,)
+# The field derivative in the input is a full Jacobian from the latent solve.
+assert jax.jacobian(solver)(point).shape == (64, 3)
+# One well-conditioned root over this linear system.
+assert not solver.report.multiple_roots
+```
+
 ## The objective route
 
 There is also an experimental route that never inverts anything. It fits `f`

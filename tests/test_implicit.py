@@ -344,6 +344,51 @@ def test_reduced_solver_flags_multiple_roots_and_ill_conditioning() -> None:
     assert float(solver.report.min_conditioning) < 0.1
 
 
+_ROM_LOCAL_MODES = jnp.stack(
+    [
+        jnp.sin(2 * jnp.pi * _ROM_GRID),
+        jnp.cos(2 * jnp.pi * _ROM_GRID),
+        jnp.sin(6 * jnp.pi * _ROM_GRID),
+        jnp.exp(-(((_ROM_GRID - 0.5) * 8) ** 2)),
+    ]
+)
+
+
+def _rom_localized(x: jax.Array, y: jax.Array) -> jax.Array:
+    # One mode is a narrow bump, so the hard states sit in a small input region
+    # that uniform sampling underweights and a greedy choice targets.
+    laplacian = -2.0 * y + jnp.roll(y, 1) + jnp.roll(y, -1)
+    return -laplacian + 0.5 * y + 0.5 * y**3 - x @ _ROM_LOCAL_MODES
+
+
+def test_greedy_snapshots_beat_fixed_on_worst_case() -> None:
+    test_points = jax.random.uniform(jax.random.key(9), (40, 4), minval=-1.0, maxval=1.0)
+
+    def worst_residual(solver: sx.ReducedSolver) -> float:
+        left = jax.vmap(lambda x: jnp.linalg.norm(_rom_localized(x, solver(x))))(test_points)
+        return float(jnp.max(left))
+
+    settings = dict(form=sx.Affine(), rank=3, snapshots=6, reduced_steps=15, matrix_free=False)
+    fixed = sx.reduced_solver(
+        _rom_localized, _ROM_XDOMAIN, _rom_method(**settings), samples=64
+    )
+    greedy = sx.reduced_solver(
+        _rom_localized, _ROM_XDOMAIN, _rom_method(**settings, greedy=True), samples=64
+    )
+    assert worst_residual(greedy) < worst_residual(fixed) * 0.7
+
+
+def test_greedy_stops_at_the_snapshot_tolerance() -> None:
+    # A tolerance above every candidate residual stops after the first snapshot.
+    solver = sx.reduced_solver(
+        _rom_linear,
+        _ROM_XDOMAIN,
+        _rom_method(rank=4, snapshots=8, greedy=True, snapshot_tolerance=1e6),
+        samples=64,
+    )
+    assert solver.basis.shape[0] == 1
+
+
 def test_derivative_supervision_lowers_the_jacobian_error() -> None:
     solver = sx.reduced_solver(_rom_cubic, _ROM_XDOMAIN, _rom_method(), samples=64)
     points = jax.random.uniform(jax.random.key(3), (15, 4), minval=-1.0, maxval=1.0)

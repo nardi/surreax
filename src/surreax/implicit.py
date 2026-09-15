@@ -369,6 +369,11 @@ class ReducedSolve(eqx.Module):
     intrusive reduced-order model, so inference needs no solve. The basis is
     linear here, which suits a manifold whose Kolmogorov n-width decays fast.
 
+    With `greedy` set, the snapshots are chosen one at a time where the current
+    basis leaves the most residual, in the manner of the reduced-basis greedy of
+    Prud'homme and colleagues, https://doi.org/10.1115/1.1448332, so it reaches a
+    given accuracy with fewer full solves than the first `snapshots` samples.
+
     See Benner, Gugercin, and Willcox on projection-based model-order reduction,
     https://doi.org/10.1137/130932715, and Hesthaven and Ubbiali on the distilled
     POD-NN, https://doi.org/10.1016/j.jcp.2018.02.037.
@@ -382,6 +387,8 @@ class ReducedSolve(eqx.Module):
     reduced_steps: int = eqx.field(static=True, default=8)
     matrix_free: bool = eqx.field(static=True, default=True)
     derivative_weight: float = eqx.field(static=True, default=0.0)
+    greedy: bool = eqx.field(static=True, default=False)
+    snapshot_tolerance: float = eqx.field(static=True, default=0.0)
 
 
 class LatentReport(eqx.Module):
@@ -548,17 +555,56 @@ def _latent_report(
     )
 
 
-def _build_reduced_solver(
+def _solve_snapshots(
     residual: Residual, snapshot_inputs: Float[Array, "s d"], method: ReducedSolve
-) -> ReducedSolver:
-    """Solve the snapshots, take the POD basis, and read the latent report."""
+) -> Float[Array, "s m"]:
+    """Full-solve the residual at the snapshot inputs."""
     starts = sampling.sample(method.unknown_domain, snapshot_inputs.shape[0], seed=_START_SEED)
     step = _newton_step_matrix_free if method.matrix_free else _newton_step
-    states = _solve_independently_with(
-        step, residual, snapshot_inputs, starts, method.newton_steps
+    return _solve_independently_with(step, residual, snapshot_inputs, starts, method.newton_steps)
+
+
+def _greedy_states(
+    residual: Residual, candidates: Float[Array, "n d"], method: ReducedSolve
+) -> Float[Array, "s m"]:
+    """Pick snapshots one at a time where the current basis leaves the most residual.
+
+    Each round scores every candidate by the residual its reduced solve leaves,
+    which is cheap, and full-solves only the worst, so the full solves stay at the
+    snapshot budget while the basis targets where it is weakest.
+    """
+    def leftover(
+        x: Float[Array, " d"], center: Float[Array, " m"], basis: Float[Array, "r m"]
+    ) -> Float[Array, ""]:
+        latent = _latent_newton(
+            residual, x, jnp.zeros(basis.shape[0]), center, basis, method.reduced_steps
+        )
+        return jnp.linalg.norm(residual(x, center + basis.T @ latent))
+
+    states = _solve_snapshots(residual, candidates[:1], method)
+    for _ in range(method.snapshots - 1):
+        center, basis = _pod_basis(states, min(method.rank, states.shape[0]))
+        scores = jax.vmap(leftover, in_axes=(0, None, None))(candidates, center, basis)
+        worst = int(jnp.argmax(scores))
+        if float(scores[worst]) < method.snapshot_tolerance:
+            break
+        chosen = _solve_snapshots(residual, candidates[worst : worst + 1], method)
+        states = jnp.concatenate([states, chosen])
+    return states
+
+
+def _build_reduced_solver(
+    residual: Residual, candidates: Float[Array, "n d"], method: ReducedSolve
+) -> ReducedSolver:
+    """Choose snapshots, take the POD basis, and read the latent report."""
+    if method.greedy:
+        states = _greedy_states(residual, candidates, method)
+    else:
+        states = _solve_snapshots(residual, candidates[: method.snapshots], method)
+    center, basis = _pod_basis(states, min(method.rank, states.shape[0]))
+    report = _latent_report(
+        residual, candidates[: method.snapshots], center, basis, method.reduced_steps
     )
-    center, basis = _pod_basis(states, method.rank)
-    report = _latent_report(residual, snapshot_inputs, center, basis, method.reduced_steps)
     return ReducedSolver(
         center=center,
         basis=basis,
@@ -578,12 +624,12 @@ def reduced_solver(
 ) -> ReducedSolver:
     """Build the reduced-order solver for a residual over a domain.
 
-    Samples the domain for the snapshots, builds the basis, and returns the
-    solver on its own, so a caller has the cheap latent solve and its derivative
-    without the distilled surrogate.
+    Samples the domain for the snapshot candidates, builds the basis, and returns
+    the solver on its own, so a caller has the cheap latent solve and its
+    derivative without the distilled surrogate.
     """
     inputs = sampling.sample(domain, samples, seed=seed)
-    return _build_reduced_solver(residual, inputs[: method.snapshots], method)
+    return _build_reduced_solver(residual, inputs, method)
 
 
 def _fit_reduced_order(

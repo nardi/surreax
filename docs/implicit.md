@@ -254,6 +254,11 @@ n-width decays fast. A strongly nonlinear manifold needs a nonlinear autoencoder
 basis, which is not built yet. The latent dimension is the `rank`, and the
 residual falls as it reaches the intrinsic dimension of the manifold.
 
+Setting `greedy` chooses the snapshots one at a time where the current basis
+leaves the most residual, rather than taking the first `snapshots` samples, so it
+reaches a given accuracy with fewer full solves. It helps most when the hard
+states sit in a small part of the input space that uniform sampling underweights.
+
 <!-- name: test_implicit_reduced_order -->
 ```python
 import jax.numpy as jnp

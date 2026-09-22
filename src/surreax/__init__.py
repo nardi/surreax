@@ -44,6 +44,7 @@ from surreax.implicit import (
 )
 from surreax.reduction import active_subspace_inputs, pca_inputs, pca_outputs
 from surreax.report import ErrorReport
+from surreax.stencil import StencilResidual
 from surreax.strategy import function_kinds, recommend_block_forms, recommend_form
 from surreax.structure import Structure, analyze, prune_inputs
 
@@ -80,6 +81,7 @@ __all__ = [
     "ReducedSolver",
     "RefinedSurrogate",
     "Residual",
+    "StencilResidual",
     "Structure",
     "Target",
     "active_subspace_inputs",

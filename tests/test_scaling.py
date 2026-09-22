@@ -9,7 +9,8 @@ the check does not depend on the state size.
 import jax.numpy as jnp
 
 import surreax as sx
-from tests import systems
+from surreax.implicit import _newton_step_matrix_free
+from tests import implicit_systems, systems
 
 
 def _baseline_residual() -> float:
@@ -69,3 +70,28 @@ def test_reduced_solver_call_is_cheap_at_scale() -> None:
         systems.large_sparse_residual(jnp.array([0.4, -0.2, 0.6, 0.0]), field)
     )
     assert float(left) / _baseline_residual() < 1e-2
+
+
+def test_matrix_free_solve_reaches_a_field_a_dense_jacobian_cannot_hold() -> None:
+    # A dense Jacobian at this size would take 160 GB, so this only fits because
+    # the Newton step works from Jacobian-vector products.
+    points = 200_000
+    rod = implicit_systems.heated_rod(points)
+    x = jnp.full(4, 0.5)
+    field = jnp.zeros(points)
+    for _ in range(3):
+        field = _newton_step_matrix_free(rod.residual, x, field)
+    start = jnp.linalg.norm(rod.residual(x, jnp.zeros(points)))
+    assert float(jnp.linalg.norm(rod.residual(x, field)) / start) < 1e-5
+
+
+def test_learned_manifold_training_lowers_the_residual_with_more_steps() -> None:
+    rod = implicit_systems.radiating_rod(32)
+
+    def after(steps: int) -> float:
+        method = sx.AutoencoderSolve(
+            form=sx.Affine(), unknown_dimension=32, rank=4, steps=steps
+        )
+        return float(sx.autoencoder_solver(rod.residual, rod.domain, method).training_residual)
+
+    assert after(600) < after(100) / 2

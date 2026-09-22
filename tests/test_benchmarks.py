@@ -11,7 +11,8 @@ import pytest
 
 import surreax as sx
 from surreax.error_search import worst_case
-from tests import systems
+from surreax.implicit import _newton_step_matrix_free
+from tests import implicit_systems, systems
 
 
 @pytest.fixture(scope="module")
@@ -112,3 +113,61 @@ def test_benchmark_large_field_call(benchmark) -> None:
     point = jnp.array([0.4, -0.2, 0.6, 0.0])
     jax.block_until_ready(call(point))
     benchmark(lambda: jax.block_until_ready(call(point)))
+
+
+def _hot_spot_solvers(points: int) -> tuple[sx.ReducedSolver, sx.HyperReducedSolver]:
+    """The linear reduced solver of the rod with hot spots, and its hyper-reduction."""
+    rod = implicit_systems.rod_with_hot_spots(points)
+    method = sx.ReducedSolve(
+        form=sx.Affine(),
+        unknown_domain=rod.unknown_domain,
+        rank=6,
+        snapshots=32,
+        newton_steps=8,
+        reduced_steps=8,
+    )
+    solver = sx.reduced_solver(rod.residual, rod.domain, method, samples=64)
+    return solver, sx.hyper_reduce(solver, rod.residual, rod.domain)
+
+
+@pytest.mark.parametrize("points", [1024, 16384, 131072])
+def test_benchmark_snapshot_solve_against_state_size(benchmark, points: int) -> None:
+    # The matrix-free Newton step should grow about linearly with the state.
+    rod = implicit_systems.heated_rod(points)
+    step = eqx.filter_jit(lambda x, y: _newton_step_matrix_free(rod.residual, x, y))
+    x = jnp.full(4, 0.5)
+    field = jnp.zeros(points)
+    jax.block_until_ready(step(x, field))
+    benchmark(lambda: jax.block_until_ready(step(x, field)))
+
+
+@pytest.mark.parametrize("points", [512, 8192])
+@pytest.mark.parametrize("variant", ["full", "hyper"])
+def test_benchmark_latent_solve_against_state_size(benchmark, points: int, variant: str) -> None:
+    # The full reduced solve reads the whole residual, the hyper-reduced one a
+    # fixed number of entries, so only the first grows with the state.
+    full, hyper = _hot_spot_solvers(points)
+    solver = full if variant == "full" else hyper
+    call = eqx.filter_jit(lambda s, x: s.latent(x))
+    x = jnp.array([0.3, 0.6, 0.2, 0.8])
+    jax.block_until_ready(call(solver, x))
+    benchmark(lambda: jax.block_until_ready(call(solver, x)))
+
+
+@pytest.mark.parametrize("rank", [2, 4, 8])
+def test_benchmark_reduced_solve_against_latent_dimension(benchmark, rank: int) -> None:
+    # Each reduced Newton step is an r-by-r solve, so the cost follows the rank.
+    rod = implicit_systems.radiating_rod(4096)
+    method = sx.ReducedSolve(
+        form=sx.Affine(),
+        unknown_domain=rod.unknown_domain,
+        rank=rank,
+        snapshots=32,
+        newton_steps=8,
+        reduced_steps=8,
+    )
+    solver = sx.reduced_solver(rod.residual, rod.domain, method, samples=64)
+    call = eqx.filter_jit(lambda s, x: s.latent(x))
+    x = jnp.full(4, 0.5)
+    jax.block_until_ready(call(solver, x))
+    benchmark(lambda: jax.block_until_ready(call(solver, x)))

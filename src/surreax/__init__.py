@@ -28,6 +28,7 @@ from surreax.forms import (
     Network,
     NetworkForm,
 )
+from surreax.hyperreduction import HyperReducedSolver, LinearDecoder, hyper_reduce
 from surreax.implicit import (
     ExactSolve,
     FoldReport,
@@ -78,10 +79,12 @@ __all__ = [
     "FoldReport",
     "Grid",
     "GridExport",
+    "HyperReducedSolver",
     "ImplicitSurrogate",
     "InverseMap",
     "LatentGuess",
     "LatentReport",
+    "LinearDecoder",
     "LinearForm",
     "MaxAffine",
     "MaxAffineExport",
@@ -108,6 +111,7 @@ __all__ = [
     "fit_implicit",
     "fit_separable",
     "function_kinds",
+    "hyper_reduce",
     "linear_energy",
     "pca_inputs",
     "pca_outputs",

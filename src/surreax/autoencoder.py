@@ -22,12 +22,13 @@ https://doi.org/10.1016/j.jcp.2019.108973.
 """
 
 from collections.abc import Callable
+from typing import Any, cast
 
 import equinox as eqx
 import jax
 import jax.numpy as jnp
 import optax
-from jaxtyping import Array, Float, PRNGKeyArray, PyTree
+from jaxtyping import Array, Float, Int, PRNGKeyArray, PyTree
 
 from surreax.domain import Domain
 from surreax.fitted import FittedSurrogate
@@ -57,6 +58,17 @@ class Autoencoder(eqx.Module):
     def decode(self, z: Float[Array, " r"]) -> Float[Array, " m"]:
         """Map a latent to a full state on the manifold."""
         return self.center + self.linear_decoder @ z + self.decoder(z)
+
+    def decode_rows(self, z: Float[Array, " r"], rows: Int[Array, " s"]) -> Float[Array, " s"]:
+        """Map a latent to the state on `rows` only, without the other rows."""
+        hidden = z
+        for layer in self.decoder.layers[:-1]:
+            hidden = self.decoder.activation(layer(hidden))
+        last = self.decoder.layers[-1]
+        # The decoder is built with a final bias, so the layer always carries one.
+        bias = cast("Array", last.bias)
+        network = last.weight[rows] @ hidden + bias[rows]
+        return self.center[rows] + self.linear_decoder[rows] @ z + network
 
     def encode(self, y: Float[Array, " m"]) -> Float[Array, " r"]:
         """Map a full state to its latent."""
@@ -92,67 +104,92 @@ def _initial_autoencoder(
     )
 
 
+Objective = Callable[[Any, Float[Array, " n"], Float[Array, " r"]], Float[Array, " k"]]
+"""A residual in the latent, `objective(model, x, z)`, that a latent solve drives down.
+
+The model is any Equinox module whose arrays the objective reads, so `Any` is
+the narrowest type that covers both the autoencoder and the hyper-reduced
+solver without importing the latter here.
+"""
+
+
 def _stationarity(
-    autoencoder: Autoencoder, x: Float[Array, " n"], z: Float[Array, " r"]
+    objective: Objective, model: Any, x: Float[Array, " n"], z: Float[Array, " r"]
 ) -> Float[Array, " r"]:
-    """The least-squares normal equations, `J_D^T J_g^T g`, zero at the solve."""
-    residual_value, pullback = jax.vjp(
-        lambda latent: autoencoder.residual(x, autoencoder.decode(latent)), z
-    )
-    return pullback(residual_value)[0]
+    """The least-squares normal equations, `J^T objective`, zero at the solve."""
+    value, pullback = jax.vjp(lambda latent: objective(model, x, latent), z)
+    return pullback(value)[0]
 
 
 @eqx.filter_custom_jvp
-def _latent_solve(
-    autoencoder: Autoencoder, x: Float[Array, " n"], start: Float[Array, " r"], steps: int
+def least_squares_latent(
+    objective: Objective,
+    model: Any,
+    x: Float[Array, " n"],
+    start: Float[Array, " r"],
+    steps: int,
 ) -> Float[Array, " r"]:
-    """Gauss-Newton on `||g(x, D(z))||` in the latent, from `start`."""
+    """Gauss-Newton on `||objective(model, x, z)||` in the latent, from `start`.
 
-    def decoded_residual(latent: Float[Array, " r"]) -> Float[Array, " m"]:
-        return autoencoder.residual(x, autoencoder.decode(latent))
-
+    The derivative comes from the implicit function theorem on the normal
+    equations, so gradients reach the model and the input without
+    differentiating the iterates.
+    """
     latent = start
     for _ in range(steps):
-        jacobian = jax.jacfwd(decoded_residual)(latent)
-        latent = latent - jnp.linalg.lstsq(jacobian, decoded_residual(latent))[0]
+        jacobian = jax.jacfwd(lambda z: objective(model, x, z))(latent)
+        latent = latent - jnp.linalg.lstsq(jacobian, objective(model, x, latent))[0]
     return latent
 
 
-@_latent_solve.def_jvp
-def _latent_solve_jvp(
-    primals: tuple[Autoencoder, Float[Array, " n"], Float[Array, " r"], int],
-    tangents: tuple[PyTree, Float[Array, " n"] | None, Float[Array, " r"] | None, None],
+@least_squares_latent.def_jvp
+def _least_squares_latent_jvp(
+    primals: tuple[Objective, Any, Float[Array, " n"], Float[Array, " r"], int],
+    tangents: tuple[None, PyTree, Float[Array, " n"] | None, Float[Array, " r"] | None, None],
 ) -> tuple[Float[Array, " r"], Float[Array, " r"]]:
     """Differentiate the latent solve by the implicit function theorem.
 
-    The solve zeroes the normal equations `q`, so a change in the autoencoder or
-    the input moves the latent by `-(dq/dz)^{-1} q_dot`, where `q_dot` is the
-    change in `q` at a fixed latent. This avoids differentiating the Gauss-Newton
-    iterates.
+    The solve zeroes the normal equations `q`, so a change in the model or the
+    input moves the latent by `-(dq/dz)^{-1} q_dot`, where `q_dot` is the change
+    in `q` at a fixed latent.
     """
-    autoencoder, x, start, steps = primals
-    autoencoder_tangent, x_tangent, _, _ = tangents
-    latent = _latent_solve(autoencoder, x, start, steps)
-    arrays, static = eqx.partition(autoencoder, eqx.is_inexact_array)
+    objective, model, x, start, steps = primals
+    _, model_tangent, x_tangent, _, _ = tangents
+    latent = least_squares_latent(objective, model, x, start, steps)
+    arrays, static = eqx.partition(model, eqx.is_inexact_array)
     if x_tangent is None:
         x_tangent = jnp.zeros_like(x)
     # An unperturbed array arrives with a `None` tangent, which `jax.jvp` needs as
     # an explicit zero of the same shape.
-    autoencoder_tangent = jax.tree.map(
-        lambda array, tangent: None if array is None else (
-            jnp.zeros_like(array) if tangent is None else tangent
-        ),
+    model_tangent = jax.tree.map(
+        lambda array, tangent: None
+        if array is None
+        else (jnp.zeros_like(array) if tangent is None else tangent),
         arrays,
-        autoencoder_tangent,
+        model_tangent,
         is_leaf=lambda leaf: leaf is None,
     )
-    latent_jacobian = jax.jacobian(lambda z: _stationarity(autoencoder, x, z))(latent)
+    latent_jacobian = jax.jacobian(lambda z: _stationarity(objective, model, x, z))(latent)
     _, stationarity_tangent = jax.jvp(
-        lambda a, point: _stationarity(eqx.combine(a, static), point, latent),
+        lambda a, point: _stationarity(objective, eqx.combine(a, static), point, latent),
         (arrays, x),
-        (autoencoder_tangent, x_tangent),
+        (model_tangent, x_tangent),
     )
     return latent, -jnp.linalg.solve(latent_jacobian, stationarity_tangent)
+
+
+def _decoded_residual(
+    autoencoder: Autoencoder, x: Float[Array, " n"], z: Float[Array, " r"]
+) -> Float[Array, " m"]:
+    """The full residual at the decoded latent, `g(x, D(z))`."""
+    return autoencoder.residual(x, autoencoder.decode(z))
+
+
+def _latent_solve(
+    autoencoder: Autoencoder, x: Float[Array, " n"], start: Float[Array, " r"], steps: int
+) -> Float[Array, " r"]:
+    """Least-squares solve on the learned manifold, from `start`."""
+    return least_squares_latent(_decoded_residual, autoencoder, x, start, steps)
 
 
 class AutoencoderSolve(eqx.Module):

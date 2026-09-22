@@ -419,6 +419,62 @@ method = sx.ReducedSolve(
 assert sx.recommend_reduced_method(residual, domain, method) is method
 ```
 
+## Hyper-reduction
+
+A reduced solve works in a small latent, but each Newton step still evaluates the
+whole residual, so its cost grows with the state. `hyper_reduce` removes that.
+It takes residual snapshots near the manifold, keeps a small residual basis, and
+picks a few residual entries from which that basis can be recovered, by the
+discrete empirical interpolation method of Chaturantabut and Sorensen,
+[DEIM](https://doi.org/10.1137/090766498). The latent solve then minimizes the
+residual rebuilt from those entries alone, the GNAT method of Carlberg and
+colleagues, [GNAT](https://doi.org/10.1016/j.jcp.2013.02.028).
+
+Reading a few entries only saves work if the residual can be evaluated entry by
+entry. A `StencilResidual` gives it that shape. You write one entry function and
+a table of neighbor indices, so entry `i` reads the state only at `stencil[i]`.
+The hyper-reduced solve then decodes the state on those neighbors and nothing
+else. It reads the same number of state entries whatever the size of the state,
+and it works under both the linear solver and the learned-manifold one.
+
+Here a rod radiates heat only at three bare patches, so the nonlinear part of its
+residual lives on a few points, and the chosen entries gather there.
+
+<!-- name: test_implicit_hyper_reduction -->
+```python
+import jax.numpy as jnp
+import surreax as sx
+
+points = 256
+position = jnp.arange(points) / (points - 1)
+patches = sum(jnp.exp(-(((position - p) * points / 1.5) ** 2)) for p in (0.25, 0.5, 0.75))
+heaters = jnp.stack([jnp.sin((k + 1) * jnp.pi * position) for k in range(4)])
+index = jnp.arange(points)[:, None] + jnp.array([-1, 0, 1])
+inside = ((index >= 0) & (index < points)).astype(float)
+
+
+def entry(x, i, near):
+    left, here, right = near * inside[i]
+    radiation = 3.0 * patches[i] * here * jnp.abs(here) ** 3
+    return -(left - 2.0 * here + right) + 0.5 * here + radiation - x @ heaters[:, i]
+
+
+residual = sx.StencilResidual(stencil=jnp.clip(index, 0, points - 1), entry=entry)
+domain = sx.box([0.0] * 4, [1.0] * 4)
+method = sx.ReducedSolve(
+    form=sx.Affine(),
+    unknown_domain=sx.box([-2.0] * points, [2.0] * points),
+    rank=6,
+    snapshots=32,
+)
+solver = sx.reduced_solver(residual, domain, method, samples=64)
+hyper = sx.hyper_reduce(solver, residual, domain)
+
+# The latent solve reads a few dozen of the 256 state entries.
+assert hyper.rows.shape[0] < 64
+assert hyper(jnp.full(4, 0.5)).shape == (points,)
+```
+
 ## The objective route
 
 There is also an experimental route that never inverts anything. It fits `f`

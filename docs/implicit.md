@@ -323,6 +323,57 @@ assert jax.jacobian(solver)(point).shape == (64, 3)
 assert not solver.report.multiple_roots
 ```
 
+## A learned manifold without solved states
+
+The reduced-order model above needs a few full solves to build its basis. When
+even those are too expensive, `AutoencoderSolve` learns the manifold from the
+residual alone. A decoder maps a small latent to the full state, and the reduced
+solve picks the latent whose decoded state leaves the least residual, by
+Gauss-Newton on `||g(x, D(z))||`. That is the least-squares Petrov-Galerkin
+projection of Carlberg and colleagues,
+[LSPG](https://arxiv.org/abs/2012.06073). Training samples inputs,
+reduce-solves them, and lowers the residual the decoded states leave, with the
+derivative through the inner solve taken by the implicit function theorem. It
+only ever evaluates `g` forward, so no full state is solved.
+
+An encoder is trained next to the decoder so that `E(D(z)) = z`, which lets you
+map a known state back into the latent. The decoder is nonlinear, so it can
+follow a manifold that bends, in the manner of Lee and Carlberg,
+[nonlinear-manifold ROMs](https://doi.org/10.1016/j.jcp.2019.108973). The price is
+that the result is no longer a linear program, and the training is slower than a
+closed-form fit.
+
+`autoencoder_solver` returns the trained solver on its own, and `fit_implicit`
+distills it into a `DecodedSurrogate` that predicts the latent and decodes it, so
+inference needs no solve. Like the network form, it holds an activation function,
+so jit it with `equinox.filter_jit`.
+
+<!-- name: test_implicit_autoencoder -->
+```python
+import jax.numpy as jnp
+import surreax as sx
+
+grid = jnp.linspace(0.0, 1.0, 32)
+modes = jnp.stack([jnp.sin(2 * jnp.pi * grid), jnp.cos(2 * jnp.pi * grid)])
+
+
+def residual(x, y):
+    # A rod heated by two source modes that sheds heat with a cubic term.
+    laplacian = -2.0 * y + jnp.roll(y, 1) + jnp.roll(y, -1)
+    return -laplacian + 0.5 * y + 0.3 * y**3 - x @ modes
+
+
+domain = sx.box([-1.0, -1.0], [1.0, 1.0])
+method = sx.AutoencoderSolve(
+    form=sx.ChebyshevPolynomial(degree=3), unknown_dimension=32, rank=2, steps=400
+)
+solver = sx.autoencoder_solver(residual, domain, method)
+
+# The residual the learned solve leaves, relative to the residual at zero.
+assert float(solver.training_residual) < 0.2
+assert solver(jnp.array([0.4, -0.2])).shape == (32,)
+```
+
 ## The objective route
 
 There is also an experimental route that never inverts anything. It fits `f`

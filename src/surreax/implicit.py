@@ -26,6 +26,7 @@ import optimistix as optx
 from jaxtyping import Array, Bool, Float
 
 from surreax import normalize, reduction, sampling, strategy
+from surreax.autoencoder import AutoencoderSolver, DecodedSurrogate, train_autoencoder
 from surreax.domain import Domain, box_from_data
 from surreax.fitted import FittedSurrogate
 from surreax.fitting import LinearModel, fit_linear, fit_linear_sobolev
@@ -796,6 +797,76 @@ def _fit_objective(
     )
 
 
+class AutoencoderSolve(eqx.Module):
+    """Fit a large-unknown target on a learned manifold, with no solved states.
+
+    Trains a decoder and an encoder on the residual alone, reduce-solves every
+    sample on the learned manifold, and distills the input-to-latent map into an
+    explicit surrogate that decodes its output. It suits a system where solving
+    the full residual is too expensive to produce snapshots, and a manifold that
+    bends. See `autoencoder` for the method.
+    """
+
+    form: LinearForm
+    unknown_dimension: int = eqx.field(static=True)
+    rank: int = eqx.field(static=True)
+    width: int = eqx.field(static=True, default=32)
+    depth: int = eqx.field(static=True, default=2)
+    steps: int = eqx.field(static=True, default=1000)
+    learning_rate: float = eqx.field(static=True, default=1e-2)
+    batch: int = eqx.field(static=True, default=64)
+    consistency_weight: float = eqx.field(static=True, default=0.1)
+    reduced_steps: int = eqx.field(static=True, default=5)
+
+
+def autoencoder_solver(
+    residual: Residual,
+    domain: Domain,
+    method: AutoencoderSolve,
+    *,
+    seed: int = 0,
+) -> AutoencoderSolver:
+    """Train the learned-manifold solver for a residual over a domain.
+
+    Returns the solver on its own, so a caller has the reduced solve on the
+    learned manifold and its derivative without the distilled surrogate. The
+    training evaluates the residual forward only and never solves the full
+    system.
+    """
+    held_out = sampling.sample(domain, method.batch, seed=seed)
+    return train_autoencoder(
+        residual,
+        domain,
+        unknown_dimension=method.unknown_dimension,
+        rank=method.rank,
+        width=method.width,
+        depth=method.depth,
+        steps=method.steps,
+        learning_rate=method.learning_rate,
+        batch=method.batch,
+        consistency_weight=method.consistency_weight,
+        reduced_steps=method.reduced_steps,
+        held_out=held_out,
+        seed=seed,
+    )
+
+
+def _fit_autoencoder(
+    residual: Residual,
+    domain: Domain,
+    inputs: Float[Array, "n d"],
+    method: AutoencoderSolve,
+    holdout: float,
+    ridge: float,
+    seed: int,
+) -> DecodedSurrogate:
+    """Train the solver, reduce-solve every sample, and distill the latent map."""
+    solver = autoencoder_solver(residual, domain, method, seed=seed)
+    latents = jax.vmap(solver.latent)(inputs)
+    latent_map = fit_data(inputs, latents, method.form, holdout=holdout, ridge=ridge)
+    return DecodedSurrogate(latent_map=latent_map, solver=solver, report=latent_map.report)
+
+
 def recommend_method(
     residual: Residual,
     domain: Domain,
@@ -826,7 +897,7 @@ def recommend_method(
 def fit_implicit(
     residual: Residual,
     domain: Domain,
-    method: InverseMap | Objective | ExactSolve | ReducedSolve | None = None,
+    method: InverseMap | Objective | ExactSolve | ReducedSolve | AutoencoderSolve | None = None,
     *,
     unknown_domain: Domain | None = None,
     samples: int = 512,
@@ -834,7 +905,7 @@ def fit_implicit(
     ridge: float = 1e-8,
     refine_steps: int = 0,
     seed: int = 0,
-) -> ImplicitSurrogate | FittedSurrogate | RefinedSurrogate:
+) -> ImplicitSurrogate | FittedSurrogate | DecodedSurrogate | RefinedSurrogate:
     """Fit a surrogate `f` with `residual(x, f(x))` near zero, through a method.
 
     Samples the domain, builds the surrogate through the strategy `method`, and
@@ -854,7 +925,7 @@ def fit_implicit(
 
     match method:
         case InverseMap():
-            base: ImplicitSurrogate | FittedSurrogate = _fit_inverse_map(
+            base: ImplicitSurrogate | FittedSurrogate | DecodedSurrogate = _fit_inverse_map(
                 residual, train_inputs, method, holdout, ridge
             )
         case Objective():
@@ -863,10 +934,14 @@ def fit_implicit(
             base = _fit_exact_solve(residual, train_inputs, method, holdout, ridge)
         case ReducedSolve():
             base = _fit_reduced_order(residual, train_inputs, method, holdout, ridge)
+        case AutoencoderSolve():
+            base = _fit_autoencoder(
+                residual, domain, train_inputs, method, holdout, ridge, seed
+            )
         case _:
             raise TypeError(f"unsupported implicit method: {type(method).__name__}")
 
-    surrogate: ImplicitSurrogate | FittedSurrogate | RefinedSurrogate = base
+    surrogate: ImplicitSurrogate | FittedSurrogate | DecodedSurrogate | RefinedSurrogate = base
     if refine_steps > 0:
         surrogate = refine(base, residual, steps=refine_steps)
 

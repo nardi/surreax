@@ -5,6 +5,7 @@ returns a `FittedSurrogate` that keeps the chosen form.
 """
 
 from surreax.api import Target, fit, fit_adaptive
+from surreax.autoencoder import Autoencoder, AutoencoderSolver, DecodedSurrogate
 from surreax.composite import CompositeSurrogate, fit_separable
 from surreax.domain import Box, Domain, box, box_from_data
 from surreax.export import DifferenceExport, GridExport, MaxAffineExport, export
@@ -22,6 +23,7 @@ from surreax.forms import (
     NetworkForm,
 )
 from surreax.implicit import (
+    AutoencoderSolve,
     ExactSolve,
     FoldReport,
     ImplicitSurrogate,
@@ -32,6 +34,7 @@ from surreax.implicit import (
     ReducedSolver,
     RefinedSurrogate,
     Residual,
+    autoencoder_solver,
     fit_data,
     fit_implicit,
     recommend_method,
@@ -46,9 +49,13 @@ from surreax.structure import Structure, analyze, prune_inputs
 
 __all__ = [
     "Affine",
+    "Autoencoder",
+    "AutoencoderSolve",
+    "AutoencoderSolver",
     "Box",
     "ChebyshevPolynomial",
     "CompositeSurrogate",
+    "DecodedSurrogate",
     "DifferenceExport",
     "DifferenceOfMaxAffine",
     "DifferenceOfMaxAffineForm",
@@ -77,6 +84,7 @@ __all__ = [
     "Target",
     "active_subspace_inputs",
     "analyze",
+    "autoencoder_solver",
     "box",
     "box_from_data",
     "export",

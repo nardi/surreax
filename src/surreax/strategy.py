@@ -145,3 +145,15 @@ def residual_is_affine_in_unknown(
     scale = jnp.mean(jnp.linalg.norm(jacobians, axis=(1, 2))) + 1e-12
     variation = jnp.mean(jnp.linalg.norm(jacobians - jnp.mean(jacobians, axis=0), axis=(1, 2)))
     return bool(variation <= tolerance * scale)
+
+
+def linear_energy(states: Float[Array, "s m"], rank: int) -> float:
+    """Fraction of the variation of solved states that `rank` linear modes capture.
+
+    The singular values of the centered states decay fast when the solutions lie
+    near a linear subspace and slowly when the manifold bends or carries a moving
+    feature, so this reads the Kolmogorov n-width at `rank` from the snapshots.
+    """
+    singular = jnp.linalg.svd(states - jnp.mean(states, axis=0), compute_uv=False)
+    total = jnp.sum(singular**2)
+    return float(jnp.sum(singular[:rank] ** 2) / jnp.where(total > 0, total, 1.0))

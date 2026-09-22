@@ -5,7 +5,13 @@ returns a `FittedSurrogate` that keeps the chosen form.
 """
 
 from surreax.api import Target, fit, fit_adaptive
-from surreax.autoencoder import Autoencoder, AutoencoderSolver, DecodedSurrogate
+from surreax.autoencoder import (
+    Autoencoder,
+    AutoencoderSolve,
+    AutoencoderSolver,
+    DecodedSurrogate,
+    LatentGuess,
+)
 from surreax.composite import CompositeSurrogate, fit_separable
 from surreax.domain import Box, Domain, box, box_from_data
 from surreax.export import DifferenceExport, GridExport, MaxAffineExport, export
@@ -23,7 +29,6 @@ from surreax.forms import (
     NetworkForm,
 )
 from surreax.implicit import (
-    AutoencoderSolve,
     ExactSolve,
     FoldReport,
     ImplicitSurrogate,
@@ -38,6 +43,7 @@ from surreax.implicit import (
     fit_data,
     fit_implicit,
     recommend_method,
+    recommend_reduced_method,
     reduced_solver,
     refine,
     root_find,
@@ -45,7 +51,12 @@ from surreax.implicit import (
 from surreax.reduction import active_subspace_inputs, pca_inputs, pca_outputs
 from surreax.report import ErrorReport
 from surreax.stencil import StencilResidual
-from surreax.strategy import function_kinds, recommend_block_forms, recommend_form
+from surreax.strategy import (
+    function_kinds,
+    linear_energy,
+    recommend_block_forms,
+    recommend_form,
+)
 from surreax.structure import Structure, analyze, prune_inputs
 
 __all__ = [
@@ -69,6 +80,7 @@ __all__ = [
     "GridExport",
     "ImplicitSurrogate",
     "InverseMap",
+    "LatentGuess",
     "LatentReport",
     "LinearForm",
     "MaxAffine",
@@ -96,12 +108,14 @@ __all__ = [
     "fit_implicit",
     "fit_separable",
     "function_kinds",
+    "linear_energy",
     "pca_inputs",
     "pca_outputs",
     "prune_inputs",
     "recommend_block_forms",
     "recommend_form",
     "recommend_method",
+    "recommend_reduced_method",
     "reduced_solver",
     "refine",
     "root_find",

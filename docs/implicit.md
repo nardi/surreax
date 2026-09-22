@@ -374,6 +374,51 @@ assert float(solver.training_residual) < 0.2
 assert solver(jnp.array([0.4, -0.2])).shape == (32,)
 ```
 
+### A moving front, and when to leave the linear basis
+
+Some manifolds are hard to reach from the residual alone. Picture fluid in a pipe
+flowing past a heater you can slide along it. The fluid is cold before the heater
+and warm after it, so the solution is a sharp step whose position follows the
+heater. Two numbers, the heater position and the flow rate, fix the state, but a
+linear basis needs about one mode per step position. On 64 points, eight linear
+modes still leave most of the residual.
+
+Training from a random start does not find that step. Setting `snapshots` solves
+that many full states first. The autoencoder starts from their linear basis and
+is trained to reconstruct them, then the residual training refines it. With 16
+snapshots, a rank-2 learned manifold leaves about a third of the residual that
+eight linear modes leave. A sharp feature also gives the latent solve local
+minima, so every solve starts from a small learned network, the `LatentGuess`,
+that predicts where the solve ends up.
+
+`recommend_reduced_method` makes the choice for you. It solves the snapshots a
+`ReducedSolve` asks for and reads how much of their variation its rank captures,
+with `linear_energy`. When the linear basis leaves out almost nothing, it keeps
+the linear model, which is simpler and exact. Otherwise it returns an
+`AutoencoderSolve` at the same rank, pretrained on the same snapshots.
+
+<!-- name: test_implicit_recommend_reduced -->
+```python
+import jax.numpy as jnp
+import surreax as sx
+
+grid = jnp.linspace(0.0, 1.0, 64)
+shapes = jnp.stack([jnp.sin(jnp.pi * grid), jnp.sin(2 * jnp.pi * grid), grid * (1 - grid)])
+
+
+def residual(x, y):
+    laplacian = -2.0 * y + jnp.roll(y, 1) + jnp.roll(y, -1)
+    return -laplacian + 0.5 * y - x @ shapes
+
+
+domain = sx.box([-1.0, -1.0, -1.0], [1.0, 1.0, 1.0])
+method = sx.ReducedSolve(
+    form=sx.Affine(), unknown_domain=sx.box([-3.0] * 64, [3.0] * 64), rank=3, snapshots=16
+)
+# Three sources span this field exactly, so the linear model stays.
+assert sx.recommend_reduced_method(residual, domain, method) is method
+```
+
 ## The objective route
 
 There is also an experimental route that never inverts anything. It fits `f`

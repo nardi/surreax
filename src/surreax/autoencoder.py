@@ -1,4 +1,4 @@
-"""A reduced-order model on a learned manifold, trained without solved states.
+"""A reduced-order model on a learned manifold, trained on the residual.
 
 A decoder maps a small latent to the full unknown, so the states it can produce
 form a manifold. The reduced solve looks for the latent whose decoded state
@@ -10,10 +10,15 @@ the manifold is still poor, which keeps the training stable.
 Training needs only forward evaluations of the residual. For sampled inputs it
 reduce-solves for the latent, decodes, and lowers the residual that the decoded
 state leaves, differentiating through the inner solve with the implicit function
-theorem. No state is ever solved in the full space. An encoder is trained
-alongside so that `E(D(z)) = z`, which makes it a left inverse of the decoder,
-for encoding a known state into the latent. The nonlinear-manifold setting
-follows Lee and Carlberg, https://doi.org/10.1016/j.jcp.2019.108973.
+theorem. By default no state is ever solved in the full space. A manifold with
+a sharp moving feature is hard to find that way, so a few solved snapshots can
+pretrain the autoencoder first, and a small learned guess starts each latent
+solve near its answer, away from the local minima a sharp feature creates.
+
+An encoder is trained alongside so that `E(D(z)) = z`, which makes it a left
+inverse of the decoder, for encoding a known state into the latent. The
+nonlinear-manifold setting follows Lee and Carlberg,
+https://doi.org/10.1016/j.jcp.2019.108973.
 """
 
 from collections.abc import Callable
@@ -26,6 +31,7 @@ from jaxtyping import Array, Float, PRNGKeyArray, PyTree
 
 from surreax.domain import Domain
 from surreax.fitted import FittedSurrogate
+from surreax.forms.protocol import LinearForm
 from surreax.report import ErrorReport
 
 Residual = Callable[[Float[Array, " n"], Float[Array, " m"]], Float[Array, " m"]]
@@ -149,14 +155,64 @@ def _latent_solve_jvp(
     return latent, -jnp.linalg.solve(latent_jacobian, stationarity_tangent)
 
 
+class AutoencoderSolve(eqx.Module):
+    """Fit a large-unknown target on a learned manifold.
+
+    Trains a decoder and an encoder on the residual, reduce-solves every sample
+    on the learned manifold, and distills the input-to-latent map into an
+    explicit surrogate that decodes its output. By default it never solves the
+    full system. A manifold with a sharp moving feature is hard to find from a
+    random start, so a positive `snapshots` solves that many full states first
+    and pretrains the autoencoder to reconstruct them, starting from their linear
+    basis, before the residual training refines it.
+    """
+
+    form: LinearForm
+    unknown_dimension: int = eqx.field(static=True)
+    rank: int = eqx.field(static=True)
+    width: int = eqx.field(static=True, default=32)
+    depth: int = eqx.field(static=True, default=2)
+    steps: int = eqx.field(static=True, default=1000)
+    learning_rate: float = eqx.field(static=True, default=1e-2)
+    batch: int = eqx.field(static=True, default=64)
+    consistency_weight: float = eqx.field(static=True, default=0.1)
+    reduced_steps: int = eqx.field(static=True, default=5)
+    snapshots: int = eqx.field(static=True, default=0)
+    pretrain_steps: int = eqx.field(static=True, default=2000)
+    newton_steps: int = eqx.field(static=True, default=8)
+    matrix_free: bool = eqx.field(static=True, default=True)
+
+
+class LatentGuess(eqx.Module):
+    """A small network from the input to a starting latent for the reduced solve.
+
+    A manifold with a sharp feature gives the least-squares solve local minima,
+    so starting every solve at zero can land in the wrong one. The guess learns
+    where the solve ends up, so each solve starts near its answer.
+    """
+
+    center: Float[Array, " n"]
+    """Midpoint of the input box, subtracted before the network."""
+
+    scale: Float[Array, " n"]
+    """Half-width of the input box, divided out before the network."""
+
+    network: eqx.nn.MLP
+
+    def __call__(self, x: Float[Array, " n"]) -> Float[Array, " r"]:
+        return self.network((x - self.center) / self.scale)
+
+
 class AutoencoderSolver(eqx.Module):
     """A reduced-order solver on a learned manifold, a differentiable oracle.
 
-    A call reduce-solves for the latent and decodes it to the full state. Its
-    input derivative comes from the implicit function theorem.
+    A call reduce-solves for the latent, starting from the learned guess, and
+    decodes it to the full state. Its input derivative comes from the implicit
+    function theorem.
     """
 
     autoencoder: Autoencoder
+    guess: LatentGuess
     training_residual: Float[Array, ""]
     """Mean residual left on held-out inputs, relative to the residual at zero."""
 
@@ -167,19 +223,25 @@ class AutoencoderSolver(eqx.Module):
 
     def latent(self, x: Float[Array, " n"]) -> Float[Array, " r"]:
         """Reduce-solve for the latent at `x`."""
-        start = jnp.zeros(self.autoencoder.linear_decoder.shape[1])
-        return _latent_solve(self.autoencoder, x, start, self.reduced_steps)
+        return _latent_solve(self.autoencoder, x, self.guess(x), self.reduced_steps)
 
     def __call__(self, x: Float[Array, " n"]) -> Float[Array, " m"]:
         return self.autoencoder.decode(self.latent(x))
 
 
+class _Trainable(eqx.Module):
+    """The parts that training updates together."""
+
+    autoencoder: Autoencoder
+    guess: LatentGuess
+
+
 def _relative_residual(
-    autoencoder: Autoencoder, inputs: Float[Array, "n d"], steps: int
+    model: _Trainable, inputs: Float[Array, "n d"], steps: int
 ) -> Float[Array, ""]:
     """Mean residual the decoded solve leaves, over the mean residual at zero."""
-    rank = autoencoder.linear_decoder.shape[1]
-    latents = jax.vmap(lambda x: _latent_solve(autoencoder, x, jnp.zeros(rank), steps))(inputs)
+    autoencoder = model.autoencoder
+    latents = jax.vmap(lambda x: _latent_solve(autoencoder, x, model.guess(x), steps))(inputs)
     left = jax.vmap(
         lambda x, z: jnp.linalg.norm(autoencoder.residual(x, autoencoder.decode(z)))
     )(inputs, latents)
@@ -191,83 +253,154 @@ def _relative_residual(
     return jnp.mean(left) / jnp.where(scale > 0, scale, 1.0)
 
 
-def train_autoencoder(
-    residual: Residual,
-    domain: Domain,
-    *,
-    unknown_dimension: int,
-    rank: int,
-    width: int,
-    depth: int,
+def _optimize(
+    model: _Trainable,
+    loss: Callable[[_Trainable, PRNGKeyArray], Float[Array, ""]],
     steps: int,
     learning_rate: float,
-    batch: int,
-    consistency_weight: float,
-    reduced_steps: int,
-    held_out: Float[Array, "h d"],
-    seed: int,
-) -> AutoencoderSolver:
-    """Train the autoencoder on the residual alone, with no solved states.
-
-    Each step samples inputs and latents, reduce-solves the inputs, and lowers
-    the residual the decoded latents leave plus the consistency error of the
-    encoder, through Adam with a clipped gradient.
-    """
-    key = jax.random.key(seed)
-    init_key, key = jax.random.split(key)
-    autoencoder = _initial_autoencoder(residual, unknown_dimension, rank, width, depth, init_key)
-    dimension = held_out.shape[1]
-
-    # A fixed scale from the residual at zero keeps the loss near one at the start.
-    base = jax.vmap(lambda x: jnp.sum(residual(x, jnp.zeros(unknown_dimension)) ** 2))(held_out)
-    scale = jnp.mean(base)
-    scale = jnp.where(scale > 0, scale, 1.0)
-
-    def loss(
-        model: Autoencoder, inputs: Float[Array, "b d"], latents: Float[Array, "b r"]
-    ) -> Float[Array, ""]:
-        solved = jax.vmap(lambda x: _latent_solve(model, x, jnp.zeros(rank), reduced_steps))(
-            inputs
-        )
-        physics = jax.vmap(lambda x, z: jnp.sum(residual(x, model.decode(z)) ** 2))(
-            inputs, solved
-        )
-        consistency = jax.vmap(lambda z: jnp.sum((model.encode(model.decode(z)) - z) ** 2))(
-            latents
-        )
-        return jnp.mean(physics) / scale + consistency_weight * jnp.mean(consistency)
-
+    key: PRNGKeyArray,
+) -> _Trainable:
+    """Run Adam with a clipped gradient and a cosine schedule on a sampled loss."""
     optimizer = optax.chain(
         optax.clip_by_global_norm(1.0),
         optax.adam(optax.cosine_decay_schedule(learning_rate, steps, alpha=1e-2)),
     )
-    state = optimizer.init(eqx.filter(autoencoder, eqx.is_inexact_array))
+    state = optimizer.init(eqx.filter(model, eqx.is_inexact_array))
 
     @eqx.filter_jit
     def step(
-        model: Autoencoder, state: optax.OptState, step_key: PRNGKeyArray
-    ) -> tuple[Autoencoder, optax.OptState]:
-        input_key, latent_key = jax.random.split(step_key)
-        inputs = domain.sample_unit(jax.random.uniform(input_key, (batch, dimension)))
-        latents = jax.random.normal(latent_key, (batch, rank))
-        gradient = eqx.filter_grad(loss)(model, inputs, latents)
+        current: _Trainable, state: optax.OptState, step_key: PRNGKeyArray
+    ) -> tuple[_Trainable, optax.OptState]:
+        gradient = eqx.filter_grad(loss)(current, step_key)
         updates, state = optimizer.update(
-            gradient, state, eqx.filter(model, eqx.is_inexact_array)
+            gradient, state, eqx.filter(current, eqx.is_inexact_array)
         )
-        return eqx.apply_updates(model, updates), state
+        return eqx.apply_updates(current, updates), state
 
     for step_key in jax.random.split(key, steps):
-        autoencoder, state = step(autoencoder, state, step_key)
+        model, state = step(model, state, step_key)
+    return model
 
-    probe = jax.random.normal(jax.random.key(seed + 1), (batch, rank))
-    consistency = jnp.mean(
-        jax.vmap(lambda z: jnp.linalg.norm(autoencoder.encode(autoencoder.decode(z)) - z))(probe)
+
+def _consistency(model: _Trainable, latents: Float[Array, "b r"]) -> Float[Array, ""]:
+    """Mean squared distance between `E(D(z))` and `z`."""
+    autoencoder = model.autoencoder
+    return jnp.mean(
+        jax.vmap(lambda z: jnp.sum((autoencoder.encode(autoencoder.decode(z)) - z) ** 2))(
+            latents
+        )
+    )
+
+
+def _pretrain(
+    model: _Trainable,
+    method: AutoencoderSolve,
+    snapshot_inputs: Float[Array, "s n"],
+    snapshot_states: Float[Array, "s m"],
+    key: PRNGKeyArray,
+) -> _Trainable:
+    """Fit the autoencoder to reconstruct the snapshots, and the guess to encode them."""
+    spread = jnp.mean(jnp.sum((snapshot_states - snapshot_states.mean(axis=0)) ** 2, axis=1))
+    spread = jnp.where(spread > 0, spread, 1.0)
+
+    def loss(current: _Trainable, step_key: PRNGKeyArray) -> Float[Array, ""]:
+        autoencoder = current.autoencoder
+        latents = jax.vmap(autoencoder.encode)(snapshot_states)
+        rebuilt = jax.vmap(autoencoder.decode)(latents)
+        reconstruction = jnp.mean(jnp.sum((rebuilt - snapshot_states) ** 2, axis=1)) / spread
+        guessed = jax.vmap(current.guess)(snapshot_inputs)
+        guess = jnp.mean(jnp.sum((guessed - jax.lax.stop_gradient(latents)) ** 2, axis=1))
+        probes = jax.random.normal(step_key, (method.batch, method.rank))
+        return reconstruction + guess + method.consistency_weight * _consistency(current, probes)
+
+    return _optimize(model, loss, method.pretrain_steps, method.learning_rate * 0.3, key)
+
+
+def train_autoencoder(
+    residual: Residual,
+    domain: Domain,
+    method: AutoencoderSolve,
+    *,
+    held_out: Float[Array, "h n"],
+    seed: int,
+    snapshot_inputs: Float[Array, "s n"] | None = None,
+    snapshot_states: Float[Array, "s m"] | None = None,
+) -> AutoencoderSolver:
+    """Train the autoencoder on the residual, after optional snapshot pretraining.
+
+    Each residual step samples inputs, reduce-solves them from the guess, and
+    lowers the residual the decoded latents leave, plus the gap between the guess
+    and the solved latent and the consistency error of the encoder.
+    """
+    init_key, guess_key, pretrain_key, train_key = jax.random.split(jax.random.key(seed), 4)
+    dimension = held_out.shape[1]
+    lower, upper = domain.bounds()
+    half = (upper - lower) / 2
+    guess = LatentGuess(
+        center=(upper + lower) / 2,
+        scale=jnp.where(half > 0, half, 1.0),
+        network=eqx.nn.MLP(dimension, method.rank, method.width, 2, jnp.tanh, key=guess_key),
+    )
+    autoencoder = _initial_autoencoder(
+        residual, method.unknown_dimension, method.rank, method.width, method.depth, init_key
+    )
+    learning_rate = method.learning_rate
+    if snapshot_inputs is not None and snapshot_states is not None:
+        # Start from the linear basis of the snapshots, then let the network bend it.
+        center = snapshot_states.mean(axis=0)
+        _, _, directions = jnp.linalg.svd(snapshot_states - center, full_matrices=False)
+        basis = directions[: method.rank].T
+        autoencoder = eqx.tree_at(
+            lambda a: (a.center, a.linear_decoder, a.linear_encoder),
+            autoencoder,
+            (center, basis, basis.T),
+        )
+        model = _pretrain(
+            _Trainable(autoencoder, guess), method, snapshot_inputs, snapshot_states, pretrain_key
+        )
+        # A pretrained manifold only needs refining, so the residual phase runs slower.
+        learning_rate = learning_rate * 0.1
+    else:
+        model = _Trainable(autoencoder, guess)
+
+    # A fixed scale from the residual at zero keeps the loss near one at the start.
+    base = jax.vmap(
+        lambda x: jnp.sum(residual(x, jnp.zeros(method.unknown_dimension)) ** 2)
+    )(held_out)
+    scale = jnp.mean(base)
+    scale = jnp.where(scale > 0, scale, 1.0)
+
+    def loss(current: _Trainable, step_key: PRNGKeyArray) -> Float[Array, ""]:
+        input_key, latent_key = jax.random.split(step_key)
+        inputs = domain.sample_unit(jax.random.uniform(input_key, (method.batch, dimension)))
+        manifold = current.autoencoder
+        solved = jax.vmap(
+            lambda x: _latent_solve(
+                manifold, x, jax.lax.stop_gradient(current.guess(x)), method.reduced_steps
+            )
+        )(inputs)
+        physics = jax.vmap(lambda x, z: jnp.sum(residual(x, manifold.decode(z)) ** 2))(
+            inputs, solved
+        )
+        guessed = jax.vmap(current.guess)(inputs)
+        guess_gap = jnp.mean(jnp.sum((guessed - jax.lax.stop_gradient(solved)) ** 2, axis=1))
+        probes = jax.random.normal(latent_key, (method.batch, method.rank))
+        consistency = method.consistency_weight * _consistency(current, probes)
+        return jnp.mean(physics) / scale + guess_gap + consistency
+
+    model = _optimize(model, loss, method.steps, learning_rate, train_key)
+
+    probe = jax.random.normal(jax.random.key(seed + 1), (method.batch, method.rank))
+    trained = model.autoencoder
+    consistency_error = jnp.mean(
+        jax.vmap(lambda z: jnp.linalg.norm(trained.encode(trained.decode(z)) - z))(probe)
     )
     return AutoencoderSolver(
-        autoencoder=autoencoder,
-        training_residual=_relative_residual(autoencoder, held_out, reduced_steps),
-        consistency_error=consistency,
-        reduced_steps=reduced_steps,
+        autoencoder=trained,
+        guess=model.guess,
+        training_residual=_relative_residual(model, held_out, method.reduced_steps),
+        consistency_error=consistency_error,
+        reduced_steps=method.reduced_steps,
     )
 
 

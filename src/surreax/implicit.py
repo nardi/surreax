@@ -26,7 +26,12 @@ import optimistix as optx
 from jaxtyping import Array, Bool, Float
 
 from surreax import normalize, reduction, sampling, strategy
-from surreax.autoencoder import AutoencoderSolver, DecodedSurrogate, train_autoencoder
+from surreax.autoencoder import (
+    AutoencoderSolve,
+    AutoencoderSolver,
+    DecodedSurrogate,
+    train_autoencoder,
+)
 from surreax.domain import Domain, box_from_data
 from surreax.fitted import FittedSurrogate
 from surreax.fitting import LinearModel, fit_linear, fit_linear_sobolev
@@ -797,28 +802,6 @@ def _fit_objective(
     )
 
 
-class AutoencoderSolve(eqx.Module):
-    """Fit a large-unknown target on a learned manifold, with no solved states.
-
-    Trains a decoder and an encoder on the residual alone, reduce-solves every
-    sample on the learned manifold, and distills the input-to-latent map into an
-    explicit surrogate that decodes its output. It suits a system where solving
-    the full residual is too expensive to produce snapshots, and a manifold that
-    bends. See `autoencoder` for the method.
-    """
-
-    form: LinearForm
-    unknown_dimension: int = eqx.field(static=True)
-    rank: int = eqx.field(static=True)
-    width: int = eqx.field(static=True, default=32)
-    depth: int = eqx.field(static=True, default=2)
-    steps: int = eqx.field(static=True, default=1000)
-    learning_rate: float = eqx.field(static=True, default=1e-2)
-    batch: int = eqx.field(static=True, default=64)
-    consistency_weight: float = eqx.field(static=True, default=0.1)
-    reduced_steps: int = eqx.field(static=True, default=5)
-
-
 def autoencoder_solver(
     residual: Residual,
     domain: Domain,
@@ -829,25 +812,28 @@ def autoencoder_solver(
     """Train the learned-manifold solver for a residual over a domain.
 
     Returns the solver on its own, so a caller has the reduced solve on the
-    learned manifold and its derivative without the distilled surrogate. The
-    training evaluates the residual forward only and never solves the full
-    system.
+    learned manifold and its derivative without the distilled surrogate. With
+    `snapshots` at zero the training evaluates the residual forward only and
+    never solves the full system. Otherwise it first solves that many full states
+    from zero, to pretrain on.
     """
     held_out = sampling.sample(domain, method.batch, seed=seed)
+    if method.snapshots == 0:
+        return train_autoencoder(residual, domain, method, held_out=held_out, seed=seed)
+    snapshot_inputs = sampling.sample(domain, method.snapshots, seed=seed + 1)
+    step = _newton_step_matrix_free if method.matrix_free else _newton_step
+    starts = jnp.zeros((method.snapshots, method.unknown_dimension))
+    states = _solve_independently_with(
+        step, residual, snapshot_inputs, starts, method.newton_steps
+    )
     return train_autoencoder(
         residual,
         domain,
-        unknown_dimension=method.unknown_dimension,
-        rank=method.rank,
-        width=method.width,
-        depth=method.depth,
-        steps=method.steps,
-        learning_rate=method.learning_rate,
-        batch=method.batch,
-        consistency_weight=method.consistency_weight,
-        reduced_steps=method.reduced_steps,
+        method,
         held_out=held_out,
         seed=seed,
+        snapshot_inputs=snapshot_inputs,
+        snapshot_states=states,
     )
 
 
@@ -865,6 +851,37 @@ def _fit_autoencoder(
     latents = jax.vmap(solver.latent)(inputs)
     latent_map = fit_data(inputs, latents, method.form, holdout=holdout, ridge=ridge)
     return DecodedSurrogate(latent_map=latent_map, solver=solver, report=latent_map.report)
+
+
+def recommend_reduced_method(
+    residual: Residual,
+    domain: Domain,
+    method: ReducedSolve,
+    *,
+    tolerance: float = 1e-3,
+    seed: int = 0,
+) -> ReducedSolve | AutoencoderSolve:
+    """Choose between a linear basis and a learned manifold from the snapshots.
+
+    Solves the snapshots `method` asks for and reads how much of their variation
+    `method.rank` linear modes capture. When a linear basis leaves out less than
+    `tolerance`, the linear reduced-order model is simpler and as accurate, so
+    `method` comes back unchanged. Otherwise the manifold bends or carries a
+    moving feature, and an `AutoencoderSolve` at the same rank, pretrained on the
+    same number of snapshots, is returned.
+    """
+    inputs = sampling.sample(domain, method.snapshots, seed=seed)
+    states = _solve_snapshots(residual, inputs, method)
+    if strategy.linear_energy(states, method.rank) >= 1.0 - tolerance:
+        return method
+    return AutoencoderSolve(
+        form=method.form,
+        unknown_dimension=method.unknown_domain.dimension,
+        rank=method.rank,
+        snapshots=method.snapshots,
+        newton_steps=method.newton_steps,
+        matrix_free=method.matrix_free,
+    )
 
 
 def recommend_method(

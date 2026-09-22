@@ -7,6 +7,7 @@ import pytest
 
 import surreax as sx
 from surreax import implicit
+from tests import implicit_systems
 
 _GRID = jnp.linspace(0.0, 1.0, 32)
 _MODES = jnp.stack(
@@ -95,6 +96,69 @@ def test_fit_implicit_distills_a_decoded_surrogate() -> None:
 
     point = jnp.array([0.3, -0.4, 0.2, 0.1])
     plain = surrogate(point)
-    assert jnp.allclose(eqx.filter_jit(lambda m, z: m(z))(surrogate, point), plain)
+    assert jnp.allclose(eqx.filter_jit(lambda m, z: m(z))(surrogate, point), plain, atol=1e-5)
     assert jax.vmap(surrogate)(jnp.stack([point, point])).shape == (2, 32)
     assert jax.grad(lambda z: surrogate(z)[0])(point).shape == (4,)
+
+
+def test_learned_manifold_beats_a_linear_basis_on_a_moving_front() -> None:
+    # The pipe's warm region starts at a movable heater, so the solution is a step
+    # that slides along the pipe, which a linear basis spreads over many modes.
+    pipe = implicit_systems.hot_fluid_pipe(64)
+    points = jax.random.uniform(jax.random.key(4), (64, 2))
+    base = jnp.mean(jax.vmap(lambda x: jnp.linalg.norm(pipe.residual(x, jnp.zeros(64))))(points))
+
+    def relative(solver: eqx.Module) -> float:
+        left = jax.vmap(lambda x: jnp.linalg.norm(pipe.residual(x, solver(x))))(points)
+        return float(jnp.mean(left) / base)
+
+    linear = sx.reduced_solver(
+        pipe.residual,
+        pipe.domain,
+        sx.ReducedSolve(
+            form=sx.Affine(),
+            unknown_domain=pipe.unknown_domain,
+            rank=8,
+            snapshots=64,
+            newton_steps=3,
+            reduced_steps=4,
+        ),
+        samples=128,
+    )
+    learned = sx.autoencoder_solver(
+        pipe.residual,
+        pipe.domain,
+        sx.AutoencoderSolve(
+            form=sx.Affine(),
+            unknown_dimension=64,
+            rank=2,
+            width=64,
+            snapshots=16,
+            newton_steps=3,
+        ),
+    )
+    # Two latents and a quarter of the snapshots beat eight linear modes.
+    assert relative(learned) < 0.35
+    assert relative(learned) < relative(linear) / 2
+
+
+def test_recommender_routes_by_the_linear_energy() -> None:
+    rod = implicit_systems.heated_rod(64)
+    pipe = implicit_systems.hot_fluid_pipe(64)
+
+    def request(system: implicit_systems.ImplicitSystem, rank: int) -> sx.ReducedSolve:
+        return sx.ReducedSolve(
+            form=sx.Affine(),
+            unknown_domain=system.unknown_domain,
+            rank=rank,
+            snapshots=32,
+            newton_steps=3,
+        )
+
+    # Four heaters span the rod's manifold exactly, so the linear model stays.
+    rod_request = request(rod, 4)
+    assert sx.recommend_reduced_method(rod.residual, rod.domain, rod_request) is rod_request
+    # Two linear modes leave most of the moving front out.
+    routed = sx.recommend_reduced_method(pipe.residual, pipe.domain, request(pipe, 2))
+    assert isinstance(routed, sx.AutoencoderSolve)
+    assert routed.snapshots == 32

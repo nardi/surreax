@@ -1,15 +1,16 @@
 """Scaling tests on a large sparse implicit system.
 
 The system has a small input, a large unknown, and a nearest-neighbor Jacobian,
-so the sparse matrix-free solve and the output reduction should reach a scale the
-dense path cannot. The residual is reported relative to the residual at zero, so
-the check does not depend on the state size.
+so the sparse solves, direct or matrix-free, and the output reduction should
+reach a scale the dense path cannot. The residual is reported relative to the
+residual at zero, so the check does not depend on the state size.
 """
 
 import jax.numpy as jnp
+import pytest
 
 import surreax as sx
-from surreax.implicit import _newton_step_matrix_free
+from surreax.implicit import newton_setup
 from tests import implicit_systems, systems
 
 
@@ -72,15 +73,21 @@ def test_reduced_solver_call_is_cheap_at_scale() -> None:
     assert float(left) / _baseline_residual() < 1e-2
 
 
-def test_matrix_free_solve_reaches_a_field_a_dense_jacobian_cannot_hold() -> None:
-    # A dense Jacobian at this size would take 160 GB, so this only fits because
-    # the Newton step works from Jacobian-vector products.
+@pytest.mark.parametrize("linear_solver", ["sparse", "matrix_free"])
+def test_newton_solve_reaches_a_field_a_dense_jacobian_cannot_hold(
+    linear_solver: sx.LinearSolver,
+) -> None:
+    # A dense Jacobian at this size would take 160 GB. The sparse step factors
+    # the tridiagonal Jacobian, and the matrix-free step only needs products with
+    # it, which remains the route when a factorization does not fit in memory.
     points = 200_000
     rod = implicit_systems.heated_rod(points)
     x = jnp.full(4, 0.5)
     field = jnp.zeros(points)
+    setup = newton_setup(rod.residual, linear_solver, None, x, field)
+    assert (setup.pattern is not None) == (linear_solver == "sparse")
     for _ in range(3):
-        field = _newton_step_matrix_free(rod.residual, x, field)
+        field = setup.step(rod.residual, x, field)
     start = jnp.linalg.norm(rod.residual(x, jnp.zeros(points)))
     assert float(jnp.linalg.norm(rod.residual(x, field)) / start) < 1e-5
 

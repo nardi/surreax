@@ -8,10 +8,11 @@ import equinox as eqx
 import jax
 import jax.numpy as jnp
 import pytest
+import splineax
 
 import surreax as sx
 from surreax.error_search import worst_case
-from surreax.implicit import _newton_step_matrix_free
+from surreax.implicit import _solve_independently_with, newton_setup
 from tests import implicit_systems, systems
 
 
@@ -131,14 +132,59 @@ def _hot_spot_solvers(points: int) -> tuple[sx.ReducedSolver, sx.HyperReducedSol
 
 
 @pytest.mark.parametrize("points", [1024, 16384, 131072])
-def test_benchmark_snapshot_solve_against_state_size(benchmark, points: int) -> None:
-    # The matrix-free Newton step should grow about linearly with the state.
-    rod = implicit_systems.heated_rod(points)
-    step = eqx.filter_jit(lambda x, y: _newton_step_matrix_free(rod.residual, x, y))
-    x = jnp.full(4, 0.5)
-    field = jnp.zeros(points)
-    jax.block_until_ready(step(x, field))
-    benchmark(lambda: jax.block_until_ready(step(x, field)))
+@pytest.mark.parametrize("linear_solver", ["matrix_free", "sparse"])
+def test_benchmark_snapshot_solve_against_state_size(
+    benchmark, points: int, linear_solver: sx.LinearSolver
+) -> None:
+    # Both Newton steps should grow about linearly with the state. The sparse
+    # step runs in double precision, which selects KLU on CPU.
+    with jax.enable_x64(True):
+        rod = implicit_systems.heated_rod(points)
+        x = jnp.full(4, 0.5)
+        field = jnp.zeros(points)
+        setup = newton_setup(rod.residual, linear_solver, None, x, field)
+        step = jax.jit(lambda x, y: setup.step(rod.residual, x, y))
+        jax.block_until_ready(step(x, field))
+        benchmark(lambda: jax.block_until_ready(step(x, field)))
+
+
+_NEWTON_SYSTEMS = {
+    "rod": lambda: implicit_systems.radiating_rod(4096),
+    "network": lambda: implicit_systems.diode_network(64, 64),
+    "plate": lambda: implicit_systems.radiating_plate(64),
+}
+"""Three nonlinear systems of 4,096 unknowns: a chain, a general graph, and a grid."""
+
+
+_HYBRID = splineax.HybridSettings(iterative=splineax.GMRESOptions(), tol=1e-6)
+"""GMRES preconditioned by a stale factorization, at a tolerance the conditioning allows."""
+
+
+@pytest.mark.parametrize(
+    ("linear_solver", "reuse"),
+    [("matrix_free", None), ("sparse", None), ("sparse", _HYBRID)],
+    ids=["matrix_free", "sparse", "hybrid"],
+)
+@pytest.mark.parametrize("system", sorted(_NEWTON_SYSTEMS))
+def test_benchmark_newton_solve_against_linear_solver(
+    benchmark,
+    system: str,
+    linear_solver: sx.LinearSolver,
+    reuse: splineax.HybridSettings | None,
+) -> None:
+    # Six Newton steps for eight inputs. The hybrid should only pay off where the
+    # factorization fills in, as on the plate.
+    with jax.enable_x64(True):
+        built = _NEWTON_SYSTEMS[system]()
+        unit = jax.random.uniform(jax.random.key(0), (8, built.domain.dimension))
+        inputs = built.domain.sample_unit(unit)
+        starts = jnp.zeros((8, built.unknown_domain.dimension))
+        setup = newton_setup(built.residual, linear_solver, reuse, inputs[0], starts[0])
+        solve = jax.jit(
+            lambda a, b: _solve_independently_with(setup, built.residual, a, b, 6)
+        )
+        jax.block_until_ready(solve(inputs, starts))
+        benchmark(lambda: jax.block_until_ready(solve(inputs, starts)))
 
 
 @pytest.mark.parametrize("points", [512, 8192])

@@ -111,3 +111,28 @@ def test_hyper_reduce_needs_enough_samples(
     system, solver, _ = hot_spots
     with pytest.raises(ValueError, match="basis_size"):
         sx.hyper_reduce(solver, system.residual, system.domain, basis_size=16, samples=8)
+
+
+def test_recommendation_hyper_reduces_a_large_stencil_system(
+    hot_spots: tuple[implicit_systems.ImplicitSystem, sx.ReducedSolver, sx.HyperReducedSolver],
+) -> None:
+    system, solver, _ = hot_spots
+    chosen = sx.recommend_hyper_reduction(solver, system.residual, system.domain)
+    assert isinstance(chosen, sx.HyperReducedSolver)
+    # Asking for no accuracy loss at all keeps the full solver.
+    strict = sx.recommend_hyper_reduction(solver, system.residual, system.domain, tolerance=0.0)
+    assert strict is solver
+
+
+def test_recommendation_keeps_the_solver_when_hyper_reduction_saves_little(
+    hot_spots: tuple[implicit_systems.ImplicitSystem, sx.ReducedSolver, sx.HyperReducedSolver],
+) -> None:
+    system, solver, _ = hot_spots
+    # An opaque residual evaluates every entry, so there is nothing to sample.
+    opaque = sx.recommend_hyper_reduction(
+        solver, lambda x, y: system.residual(x, y), system.domain
+    )
+    assert opaque is solver
+    small_system, small_solver = _hot_spot_solvers(32)
+    small = sx.recommend_hyper_reduction(small_solver, small_system.residual, small_system.domain)
+    assert small is small_solver

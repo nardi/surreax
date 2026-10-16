@@ -519,6 +519,13 @@ assert hyper.rows.shape[0] < 64
 assert hyper(jnp.full(4, 0.5)).shape == (points,)
 ```
 
+`recommend_hyper_reduction` makes the choice for you. It returns the solver
+unchanged when the residual is not a `StencilResidual`, or when the sampled
+stencils would read more than half the state. Otherwise it hyper-reduces and
+checks the result on held-out inputs. It keeps the hyper-reduced solver only if
+the residual it leaves is at most `tolerance` times that of the full solver,
+1.2 by default.
+
 ## The objective route
 
 There is also an experimental route that never inverts anything. It fits `f`

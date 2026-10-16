@@ -19,6 +19,8 @@ solver and the learned-manifold solver, since both decoders can produce a
 chosen set of rows.
 """
 
+from collections.abc import Callable
+
 import equinox as eqx
 import jax
 import jax.numpy as jnp
@@ -30,6 +32,9 @@ from surreax.autoencoder import Autoencoder, AutoencoderSolver, LatentGuess, lea
 from surreax.domain import Domain
 from surreax.implicit import ReducedSolver
 from surreax.stencil import StencilResidual
+
+Residual = Callable[[Float[Array, " n"], Float[Array, " m"]], Float[Array, " m"]]
+"""A residual `g(x, y)`, from an input and an unknown to the residual vector."""
 
 
 class LinearDecoder(eqx.Module):
@@ -171,3 +176,40 @@ def hyper_reduce(
         rank=rank,
         reduced_steps=reduced_steps,
     )
+
+
+def recommend_hyper_reduction(
+    solver: ReducedSolver | AutoencoderSolver,
+    residual: Residual,
+    domain: Domain,
+    *,
+    max_fraction: float = 0.5,
+    tolerance: float = 1.2,
+    checks: int = 32,
+    seed: int = 0,
+) -> ReducedSolver | AutoencoderSolver | HyperReducedSolver:
+    """Hyper-reduce a reduced-order solver when that is cheaper and as accurate.
+
+    Returns `solver` unchanged when the residual is not a `StencilResidual`, since
+    an opaque residual evaluates every entry anyway. Otherwise it hyper-reduces
+    with the defaults of `hyper_reduce` and keeps the result only if two checks
+    pass. The sampled stencils must read at most `max_fraction` of the state, or
+    the latent solve would save little. On `checks` inputs held out from the
+    construction, the mean residual the hyper-reduced solver leaves must be at
+    most `tolerance` times the mean residual of `solver`.
+    """
+    if not isinstance(residual, StencilResidual):
+        return solver
+    hyper = hyper_reduce(solver, residual, domain, seed=seed)
+    state_size = residual.stencil.shape[0]
+    if hyper.rows.shape[0] > max_fraction * state_size:
+        return solver
+    points = sampling.sample(domain, checks, seed=seed + 1)
+
+    def mean_residual(candidate: ReducedSolver | AutoencoderSolver | HyperReducedSolver) -> float:
+        left = jax.vmap(lambda x: jnp.linalg.norm(residual(x, candidate(x))))(points)
+        return float(jnp.mean(left))
+
+    if mean_residual(hyper) > tolerance * mean_residual(solver):
+        return solver
+    return hyper

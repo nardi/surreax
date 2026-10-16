@@ -28,7 +28,12 @@ from surreax.forms import (
     Network,
     NetworkForm,
 )
-from surreax.hyperreduction import HyperReducedSolver, LinearDecoder, hyper_reduce
+from surreax.hyperreduction import (
+    HyperReducedSolver,
+    LinearDecoder,
+    hyper_reduce,
+    recommend_hyper_reduction,
+)
 from surreax.implicit import (
     ExactSolve,
     FoldReport,
@@ -121,6 +126,7 @@ __all__ = [
     "prune_inputs",
     "recommend_block_forms",
     "recommend_form",
+    "recommend_hyper_reduction",
     "recommend_linear_solver",
     "recommend_method",
     "recommend_reduced_method",

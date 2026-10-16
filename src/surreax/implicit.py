@@ -15,7 +15,9 @@ directly by minimizing the residual it leaves.
 
 from collections.abc import Callable
 from functools import partial
+from typing import NamedTuple
 
+import asdex
 import equinox as eqx
 import jax
 import jax.numpy as jnp
@@ -23,9 +25,10 @@ import lineax
 import numpy as np
 import optax
 import optimistix as optx
+import splineax
 from jaxtyping import Array, Bool, Float
 
-from surreax import normalize, reduction, sampling, strategy
+from surreax import normalize, reduction, sampling, sparse_solve, strategy
 from surreax.autoencoder import (
     AutoencoderSolve,
     AutoencoderSolver,
@@ -39,6 +42,7 @@ from surreax.flatten import ravel_example
 from surreax.forms import Affine, ChebyshevPolynomial
 from surreax.forms.protocol import LinearForm
 from surreax.report import ErrorReport
+from surreax.sparse_solve import LinearSolver, NewtonStep
 
 Residual = Callable[[Float[Array, " n"], Float[Array, " m"]], Float[Array, " m"]]
 """A residual `g(x, y)`, from an input and an unknown to the residual vector."""
@@ -76,6 +80,11 @@ def _value_report(
     )
 
 
+def _holdout_count(samples: int, holdout: float) -> int:
+    """How many trailing samples a holdout fraction sets aside, at least one."""
+    return max(1, round(samples * holdout))
+
+
 def fit_data(
     inputs: Float[Array, "s d"],
     outputs: Float[Array, "s k"],
@@ -84,6 +93,8 @@ def fit_data(
     holdout: float = 0.2,
     ridge: float = 1e-8,
     reduce_outputs: reduction.OutputReducer | None = None,
+    output_jacobians: Float[Array, "s r d"] | None = None,
+    derivative_weight: float = 0.0,
 ) -> FittedSurrogate:
     """Fit a linear form to given input-output pairs, with no target callable.
 
@@ -92,8 +103,13 @@ def fit_data(
     `fit`, used where the data is pairs rather than a callable. A `reduce_outputs`
     builder fits the map into a reduced output space, so a large output collapses
     to a handful of coefficients before the fit.
+
+    With `output_jacobians` and a positive `derivative_weight`, the fit also
+    matches the Jacobians of the outputs in the inputs, through the Sobolev fit.
+    There is one Jacobian per sample, of the outputs after `reduce_outputs` has
+    encoded them.
     """
-    holdout_count = max(1, round(inputs.shape[0] * holdout))
+    holdout_count = _holdout_count(inputs.shape[0], holdout)
     train_inputs, holdout_inputs = inputs[:-holdout_count], inputs[-holdout_count:]
     train_outputs, holdout_outputs = outputs[:-holdout_count], outputs[-holdout_count:]
 
@@ -108,7 +124,19 @@ def fit_data(
     output_normalizer = normalize.from_moments(encoded_outputs)
     normalized_inputs = jax.vmap(input_normalizer.forward)(train_inputs)
     normalized_outputs = jax.vmap(output_normalizer.forward)(encoded_outputs)
-    model = fit_linear(form, normalized_inputs, normalized_outputs, ridge=ridge)
+    if output_jacobians is not None and derivative_weight > 0.0:
+        # Rescale the Jacobians into the normalized input and output frame.
+        scale = input_normalizer.scale[None, None, :] / output_normalizer.scale[None, :, None]
+        model = fit_linear_sobolev(
+            form,
+            normalized_inputs,
+            normalized_outputs,
+            output_jacobians[:-holdout_count] * scale,
+            ridge=ridge,
+            derivative_weight=derivative_weight,
+        )
+    else:
+        model = fit_linear(form, normalized_inputs, normalized_outputs, ridge=ridge)
     _, output_unravel = ravel_example(train_outputs[0])
 
     surrogate = FittedSurrogate(
@@ -268,7 +296,8 @@ def _solve_independently(
     newton_steps: int,
 ) -> Float[Array, "n m"]:
     """Newton-solve every sample from its own start, in parallel."""
-    return _solve_independently_with(_newton_step, residual, inputs, starts, newton_steps)
+    setup = NewtonSetup(step=_newton_step, pattern=None)
+    return _solve_independently_with(setup, residual, inputs, starts, newton_steps)
 
 
 def _solve_by_continuation(
@@ -316,8 +345,12 @@ class ExactSolve(eqx.Module):
     `g = 0` for the unknown at each sample, collapses the solved unknowns onto
     their leading principal directions, and fits the map into that reduced space,
     so the surrogate predicts a handful of coefficients rather than the full
-    unknown. The solve is matrix-free through lineax by default, so it never forms
-    the dense Jacobian, which is what lets it reach a large unknown.
+    unknown. By default each Newton step factors the sparse Jacobian, which is
+    what lets it reach a large unknown, see `sparse_solve`.
+
+    A positive `derivative_weight` also fits the Jacobian of the reduced
+    coefficients in the input, which the implicit function theorem gives from
+    one transposed solve per coefficient at each solved sample.
     """
 
     form: LinearForm
@@ -325,7 +358,43 @@ class ExactSolve(eqx.Module):
     rank: int | None = eqx.field(static=True, default=None)
     variance: float = eqx.field(static=True, default=0.99)
     newton_steps: int = eqx.field(static=True, default=8)
-    matrix_free: bool = eqx.field(static=True, default=True)
+    linear_solver: LinearSolver = eqx.field(static=True, default="sparse")
+    reuse: splineax.HybridSettings | None = eqx.field(static=True, default=None)
+    derivative_weight: float = eqx.field(static=True, default=0.0)
+
+
+class NewtonSetup(NamedTuple):
+    """The Newton step chosen for a residual, and the sparsity pattern it uses."""
+
+    step: NewtonStep
+    """The step `y -> y - (dg/dy)^{-1} g(x, y)`."""
+
+    pattern: asdex.ColoredPattern | None
+    """The colored Jacobian pattern of a sparse step, in which case the solves of
+    one sample thread a solver state, or None for a dense or matrix-free step."""
+
+
+def newton_setup(
+    residual: Residual,
+    linear_solver: LinearSolver,
+    reuse: splineax.HybridSettings | None,
+    input_example: Float[Array, " n"],
+    unknown_example: Float[Array, " m"],
+) -> NewtonSetup:
+    """Choose the Newton step for a residual from the requested linear solver.
+
+    A `"sparse"` request reads the Jacobian pattern, and falls back to the
+    matrix-free step when the residual has no usable pattern.
+    """
+    if linear_solver == "dense":
+        return NewtonSetup(step=_newton_step, pattern=None)
+    if linear_solver == "sparse":
+        pattern = sparse_solve.residual_pattern(residual, input_example, unknown_example)
+        if pattern is not None:
+            return NewtonSetup(
+                step=sparse_solve.sparse_newton_step(pattern, reuse), pattern=pattern
+            )
+    return NewtonSetup(step=_newton_step_matrix_free, pattern=None)
 
 
 def _fit_exact_solve(
@@ -337,29 +406,56 @@ def _fit_exact_solve(
 ) -> FittedSurrogate:
     """Solve the residual for every sample, then fit the reduced output map."""
     starts = sampling.sample(method.unknown_domain, inputs.shape[0], seed=_START_SEED)
-    step = _newton_step_matrix_free if method.matrix_free else _newton_step
-    unknowns = _solve_independently_with(step, residual, inputs, starts, method.newton_steps)
+    setup = newton_setup(residual, method.linear_solver, method.reuse, inputs[0], starts[0])
+    unknowns = _solve_independently_with(setup, residual, inputs, starts, method.newton_steps)
+    reduce_outputs = reduction.pca_outputs(rank=method.rank, variance=method.variance)
+    if method.derivative_weight <= 0.0:
+        return fit_data(
+            inputs,
+            unknowns,
+            method.form,
+            holdout=holdout,
+            ridge=ridge,
+            reduce_outputs=reduce_outputs,
+        )
+    # The Jacobians need the reduced basis, so build it here from the same
+    # training rows `fit_data` would use, and hand it over unchanged.
+    projection = reduce_outputs(unknowns[: -_holdout_count(inputs.shape[0], holdout)])
+    jacobians = sparse_solve.reduced_state_jacobians(
+        residual, inputs, unknowns, projection.encode_matrix, method.linear_solver, setup.pattern
+    )
     return fit_data(
         inputs,
         unknowns,
         method.form,
         holdout=holdout,
         ridge=ridge,
-        reduce_outputs=reduction.pca_outputs(rank=method.rank, variance=method.variance),
+        reduce_outputs=lambda outputs: projection,
+        output_jacobians=jacobians,
+        derivative_weight=method.derivative_weight,
     )
 
 
 def _solve_independently_with(
-    step: Callable[[Residual, Float[Array, " n"], Float[Array, " m"]], Float[Array, " m"]],
+    setup: NewtonSetup,
     residual: Residual,
     inputs: Float[Array, "n d"],
     starts: Float[Array, "n m"],
     newton_steps: int,
 ) -> Float[Array, "n m"]:
-    """Iterate a Newton step over every sample from its own start, in parallel."""
+    """Iterate a Newton step over every sample from its own start.
+
+    A sparse step threads one solver state through each sample's steps, see
+    `sparse_solve.solve_samples_threaded`. The other steps run every sample in
+    parallel.
+    """
+    if setup.pattern is not None:
+        return sparse_solve.solve_samples_threaded(
+            setup.step, residual, inputs, starts, newton_steps
+        )
     unknowns = starts
     for _ in range(newton_steps):
-        unknowns = jax.vmap(lambda x, y: step(residual, x, y))(inputs, unknowns)
+        unknowns = jax.vmap(lambda x, y: setup.step(residual, x, y))(inputs, unknowns)
     return unknowns
 
 
@@ -391,7 +487,8 @@ class ReducedSolve(eqx.Module):
     snapshots: int = eqx.field(static=True, default=64)
     newton_steps: int = eqx.field(static=True, default=8)
     reduced_steps: int = eqx.field(static=True, default=8)
-    matrix_free: bool = eqx.field(static=True, default=True)
+    linear_solver: LinearSolver = eqx.field(static=True, default="sparse")
+    reuse: splineax.HybridSettings | None = eqx.field(static=True, default=None)
     derivative_weight: float = eqx.field(static=True, default=0.0)
     greedy: bool = eqx.field(static=True, default=False)
     snapshot_tolerance: float = eqx.field(static=True, default=0.0)
@@ -561,13 +658,30 @@ def _latent_report(
     )
 
 
-def _solve_snapshots(
+def _snapshot_setup(
     residual: Residual, snapshot_inputs: Float[Array, "s d"], method: ReducedSolve
+) -> NewtonSetup:
+    """The Newton step for the snapshot solves of a reduced-order method."""
+    unknown_example = sampling.sample(method.unknown_domain, 1, seed=_START_SEED)[0]
+    return newton_setup(
+        residual, method.linear_solver, method.reuse, snapshot_inputs[0], unknown_example
+    )
+
+
+def _solve_snapshots(
+    residual: Residual,
+    snapshot_inputs: Float[Array, "s d"],
+    method: ReducedSolve,
+    setup: NewtonSetup | None = None,
 ) -> Float[Array, "s m"]:
-    """Full-solve the residual at the snapshot inputs."""
+    """Full-solve the residual at the snapshot inputs.
+
+    A `setup` from an earlier call skips reading the Jacobian pattern again.
+    """
+    if setup is None:
+        setup = _snapshot_setup(residual, snapshot_inputs, method)
     starts = sampling.sample(method.unknown_domain, snapshot_inputs.shape[0], seed=_START_SEED)
-    step = _newton_step_matrix_free if method.matrix_free else _newton_step
-    return _solve_independently_with(step, residual, snapshot_inputs, starts, method.newton_steps)
+    return _solve_independently_with(setup, residual, snapshot_inputs, starts, method.newton_steps)
 
 
 def _greedy_states(
@@ -587,14 +701,15 @@ def _greedy_states(
         )
         return jnp.linalg.norm(residual(x, center + basis.T @ latent))
 
-    states = _solve_snapshots(residual, candidates[:1], method)
+    setup = _snapshot_setup(residual, candidates, method)
+    states = _solve_snapshots(residual, candidates[:1], method, setup)
     for _ in range(method.snapshots - 1):
         center, basis = _pod_basis(states, min(method.rank, states.shape[0]))
         scores = jax.vmap(leftover, in_axes=(0, None, None))(candidates, center, basis)
         worst = int(jnp.argmax(scores))
         if float(scores[worst]) < method.snapshot_tolerance:
             break
-        chosen = _solve_snapshots(residual, candidates[worst : worst + 1], method)
+        chosen = _solve_snapshots(residual, candidates[worst : worst + 1], method, setup)
         states = jnp.concatenate([states, chosen])
     return states
 
@@ -821,10 +936,12 @@ def autoencoder_solver(
     if method.snapshots == 0:
         return train_autoencoder(residual, domain, method, held_out=held_out, seed=seed)
     snapshot_inputs = sampling.sample(domain, method.snapshots, seed=seed + 1)
-    step = _newton_step_matrix_free if method.matrix_free else _newton_step
     starts = jnp.zeros((method.snapshots, method.unknown_dimension))
+    setup = newton_setup(
+        residual, method.linear_solver, method.reuse, snapshot_inputs[0], starts[0]
+    )
     states = _solve_independently_with(
-        step, residual, snapshot_inputs, starts, method.newton_steps
+        setup, residual, snapshot_inputs, starts, method.newton_steps
     )
     return train_autoencoder(
         residual,
@@ -880,8 +997,31 @@ def recommend_reduced_method(
         rank=method.rank,
         snapshots=method.snapshots,
         newton_steps=method.newton_steps,
-        matrix_free=method.matrix_free,
+        linear_solver=method.linear_solver,
+        reuse=method.reuse,
     )
+
+
+_SMALL_UNKNOWN = 32
+"""The largest unknown dimension treated as small, where a dense Jacobian is cheap."""
+
+
+def recommend_linear_solver(
+    residual: Residual, domain: Domain, unknown_domain: Domain, *, seed: int = 0
+) -> LinearSolver:
+    """Pick how a Newton step solves its Jacobian system for this residual.
+
+    A small unknown takes the dense solve. A larger one takes the sparse direct
+    solve when the residual has a usable sparsity pattern, and the matrix-free
+    solve otherwise, see `sparse_solve.residual_pattern`.
+    """
+    if unknown_domain.dimension <= _SMALL_UNKNOWN:
+        return "dense"
+    input_example = sampling.sample(domain, 1, seed=seed)[0]
+    unknown_example = sampling.sample(unknown_domain, 1, seed=_START_SEED)[0]
+    if sparse_solve.residual_pattern(residual, input_example, unknown_example) is None:
+        return "matrix_free"
+    return "sparse"
 
 
 def recommend_method(
@@ -901,9 +1041,10 @@ def recommend_method(
     affine = strategy.residual_is_affine_in_unknown(
         residual, domain, unknown_domain, samples=samples, seed=seed
     )
-    if unknown_domain.dimension > 32:
+    if unknown_domain.dimension > _SMALL_UNKNOWN:
         form: LinearForm = Affine() if affine else ChebyshevPolynomial(degree=2)
-        return ExactSolve(form=form, unknown_domain=unknown_domain)
+        linear_solver = recommend_linear_solver(residual, domain, unknown_domain, seed=seed)
+        return ExactSolve(form=form, unknown_domain=unknown_domain, linear_solver=linear_solver)
     if affine:
         return InverseMap(form=Affine(), unknown_domain=unknown_domain, newton_steps=1)
     return InverseMap(

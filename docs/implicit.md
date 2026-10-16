@@ -201,12 +201,55 @@ than the input. `ExactSolve` solves `g = 0` at each sample, collapses the
 solved unknowns onto their leading principal directions, and fits the map into
 that small reduced space.
 
-The solve is matrix-free through lineax by default, so it never forms the dense
-Jacobian. lineax finds the Newton step by GMRES from the Jacobian-vector product
-alone, which is what keeps a large unknown tractable. See Rackauckas and
-colleagues on [lineax](https://arxiv.org/abs/2311.17283). This reaches an unknown
-of several thousand states with a sparse Jacobian, since the solve cost follows
-the sparsity, not the state size.
+Each Newton step factors the sparse Jacobian by default.
+[asdex](https://github.com/adrhill/asdex) reads the sparsity pattern from the
+residual and colors it, so the Jacobian costs one Jacobian-vector product per
+color. [splineax](https://github.com/nardi/splineax) then factors it with a
+sparse direct solver. A `StencilResidual` states its pattern in its stencil
+table, so it skips the tracing. The solve cost follows the number of nonzeros,
+not the square of the state size.
+
+### Linear solvers
+
+The `linear_solver` field on `ExactSolve`, `ReducedSolve` and `AutoencoderSolve`
+sets how a Newton step solves its Jacobian system.
+
+- `"sparse"`, the default, factors the sparse Jacobian. When the residual has no
+  usable pattern, because asdex cannot read one of its operations or the pattern
+  is close to dense, it falls back to `"matrix_free"`. `residual_pattern` returns
+  the pattern it would use, or None.
+- `"matrix_free"` finds the step by GMRES from Jacobian-vector products alone,
+  through [lineax](https://arxiv.org/abs/2311.17283), and never forms the
+  Jacobian. It is the route when even a sparse factorization does not fit in
+  memory.
+- `"dense"` forms the full Jacobian, which suits a small unknown.
+
+`recommend_linear_solver` picks one from the residual, and `recommend_method` sets
+it on the `ExactSolve` it returns.
+
+### Precision
+
+The direct solver follows the JAX precision you set, and surreax never changes
+the JAX configuration. On CPU with x64 enabled it is KLU, which reuses the
+symbolic analysis and the pivot order from one Newton step to the next. Without
+x64 it is `Spsolve`, which solves in single precision and factors every step from
+scratch. A large implicit fit on CPU should turn x64 on at startup with
+`jax.config.update("jax_enable_x64", True)`. On a CUDA GPU with the splineax
+`cudss` extra installed it is cuDSS, in either precision.
+
+A `reuse` setting, a `splineax.HybridSettings`, keeps the factorization of an
+earlier Newton step as the preconditioner of an iterative solve and only factors
+again when that solve is slow. It can only pay off where a factorization is
+expensive next to a solve. In the benchmarks at 4,096 unknowns it took about
+twelve times as long as refactoring on a rod, five times as long on a 64 by 64
+plate, and about the same time on a diode network, so it is off by default.
+
+### Derivative supervision
+
+A positive `derivative_weight` on `ExactSolve` also fits the Jacobian of the
+reduced coefficients in the input. The implicit function theorem gives it from
+one transposed solve per coefficient at each solved sample, reusing the solver of
+the Newton steps, so the full Jacobian of the unknown is never formed.
 
 Here the unknown is a field of 64 states coupled by a nearest-neighbor
 Laplacian, driven by three inputs, so the solution lives on a rank-3 manifold.
@@ -244,7 +287,8 @@ needed, or the solve is to be reused online, `ReducedSolve` solves in a small
 latent space instead. It builds a proper orthogonal decomposition basis from a
 few solved snapshots, projects the residual onto that basis in the manner of
 Galerkin, and solves the reduced residual by Newton in the latent. Each reduced
-step is an `r` by `r` solve, independent of the unknown size. It then distills
+step is an `r` by `r` solve, independent of the unknown size. The snapshot
+solves use the `linear_solver` of the previous section. It then distills
 the input-to-latent map into an explicit surrogate, so inference needs no solve.
 This is the non-intrusive reduced-order model, POD-NN, of Hesthaven and Ubbiali,
 [POD-NN](https://doi.org/10.1016/j.jcp.2018.02.037).

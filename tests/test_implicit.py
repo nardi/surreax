@@ -216,7 +216,7 @@ def test_exact_solve_dense_route_agrees_with_matrix_free() -> None:
             unknown_domain=unknown_domain,
             rank=3,
             newton_steps=5,
-            matrix_free=False,
+            linear_solver="dense",
         ),
         samples=128,
     )
@@ -256,7 +256,7 @@ def test_reduced_order_latent_dimension_tracks_the_manifold() -> None:
             snapshots=16,
             newton_steps=5,
             reduced_steps=5,
-            matrix_free=False,
+            linear_solver="dense",
         )
         surrogate = sx.fit_implicit(_linear_diffusion, domain, method, samples=128)
         return float(surrogate.report.value_mean)
@@ -303,7 +303,7 @@ def _rom_method(**overrides: object) -> sx.ReducedSolve:
         "snapshots": 16,
         "newton_steps": 10,
         "reduced_steps": 12,
-        "matrix_free": False,
+        "linear_solver": "dense",
     }
     settings.update(overrides)
     return sx.ReducedSolve(**settings)  # type: ignore[arg-type]
@@ -368,7 +368,7 @@ def test_greedy_snapshots_beat_fixed_on_worst_case() -> None:
         left = jax.vmap(lambda x: jnp.linalg.norm(_rom_localized(x, solver(x))))(test_points)
         return float(jnp.max(left))
 
-    settings = dict(form=sx.Affine(), rank=3, snapshots=6, reduced_steps=15, matrix_free=False)
+    settings = dict(form=sx.Affine(), rank=3, snapshots=6, reduced_steps=15, linear_solver="dense")
     fixed = sx.reduced_solver(
         _rom_localized, _ROM_XDOMAIN, _rom_method(**settings), samples=64
     )

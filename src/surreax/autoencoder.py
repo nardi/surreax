@@ -28,12 +28,14 @@ import equinox as eqx
 import jax
 import jax.numpy as jnp
 import optax
+import splineax
 from jaxtyping import Array, Float, Int, PRNGKeyArray, PyTree
 
 from surreax.domain import Domain
 from surreax.fitted import FittedSurrogate
 from surreax.forms.protocol import LinearForm
 from surreax.report import ErrorReport
+from surreax.sparse_solve import LinearSolver
 
 Residual = Callable[[Float[Array, " n"], Float[Array, " m"]], Float[Array, " m"]]
 """A residual `g(x, y)`, from an input and an unknown to the residual vector."""
@@ -201,7 +203,8 @@ class AutoencoderSolve(eqx.Module):
     full system. A manifold with a sharp moving feature is hard to find from a
     random start, so a positive `snapshots` solves that many full states first
     and pretrains the autoencoder to reconstruct them, starting from their linear
-    basis, before the residual training refines it.
+    basis, before the residual training refines it. `linear_solver` and `reuse`
+    set how those snapshot solves factor their Jacobian, as on `ExactSolve`.
     """
 
     form: LinearForm
@@ -217,7 +220,8 @@ class AutoencoderSolve(eqx.Module):
     snapshots: int = eqx.field(static=True, default=0)
     pretrain_steps: int = eqx.field(static=True, default=2000)
     newton_steps: int = eqx.field(static=True, default=8)
-    matrix_free: bool = eqx.field(static=True, default=True)
+    linear_solver: LinearSolver = eqx.field(static=True, default="sparse")
+    reuse: splineax.HybridSettings | None = eqx.field(static=True, default=None)
 
 
 class LatentGuess(eqx.Module):

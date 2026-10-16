@@ -14,7 +14,7 @@ def _linear_solver(
         "snapshots": 32,
         "newton_steps": 12,
         "reduced_steps": 10,
-        "matrix_free": False,
+        "linear_solver": "sparse",
     }
     options.update(settings)
     method = sx.ReducedSolve(
@@ -51,11 +51,11 @@ def test_latch_ring_report_flags_two_stored_states() -> None:
 
 def test_resistor_network_is_exact_on_a_general_graph() -> None:
     network = implicit_systems.resistor_network(8, 8, sources=4)
-    solver = _linear_solver(network, rank=4, matrix_free=True)
+    solver = _linear_solver(network, rank=4)
     assert not solver.report.multiple_roots
     assert _relative(network, solver) < 1e-5
     # Four sources span the voltages, so a greedy choice of six snapshots suffices.
-    greedy = _linear_solver(network, rank=4, snapshots=6, matrix_free=True, greedy=True)
+    greedy = _linear_solver(network, rank=4, snapshots=6, greedy=True)
     assert _relative(network, greedy) < 1e-5
 
 
@@ -63,7 +63,7 @@ def test_heated_rod_residual_drops_at_the_number_of_heaters() -> None:
     rod = implicit_systems.heated_rod(256, heaters=4)
 
     def at_rank(rank: int) -> float:
-        solver = _linear_solver(rod, rank, newton_steps=3, reduced_steps=3, matrix_free=True)
+        solver = _linear_solver(rod, rank, newton_steps=3, reduced_steps=3)
         return _relative(rod, solver)
 
     assert at_rank(3) > 0.1

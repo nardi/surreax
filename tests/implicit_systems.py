@@ -99,6 +99,40 @@ def radiating_rod(points: int, heaters: int = 4) -> ImplicitSystem:
     )
 
 
+def radiating_plate(side: int, heaters: int = 4) -> ImplicitSystem:
+    """A square plate on a `side` by `side` grid, heated and radiating like the rod.
+
+    Each point exchanges heat with its four grid neighbors, so the Jacobian has
+    five nonzeros per row. Unlike the banded chain, its factorization fills in
+    between the rows of the grid, which is the case where reusing a stale
+    factorization can be cheaper than factoring again.
+    """
+    rows, cols = np.divmod(np.arange(side * side), side)
+    offsets = ((0, 0), (0, -1), (0, 1), (-1, 0), (1, 0))
+    neighbor_rows = rows[:, None] + np.array([r for r, _ in offsets])[None, :]
+    neighbor_cols = cols[:, None] + np.array([c for _, c in offsets])[None, :]
+    inside = (neighbor_rows >= 0) & (neighbor_rows < side)
+    inside &= (neighbor_cols >= 0) & (neighbor_cols < side)
+    index = np.clip(neighbor_rows, 0, side - 1) * side + np.clip(neighbor_cols, 0, side - 1)
+    stencil, mask = jnp.asarray(index), jnp.asarray(inside, dtype=float)
+    along = _heater_profiles(side, heaters)
+    across = _heater_profiles(side, 1)[0]
+    profiles = (along[:, :, None] * across[None, None, :]).reshape(heaters, side * side)
+
+    def entry(
+        x: Float[Array, " k"], i: Int[Array, ""], near: Float[Array, " 5"]
+    ) -> Float[Array, ""]:
+        here, *others = near * mask[i]
+        conduction = 4.0 * here - sum(others) + 0.5 * here
+        return conduction + _radiation(here) - x @ profiles[:, i]
+
+    return ImplicitSystem(
+        sx.StencilResidual(stencil=stencil, entry=entry),
+        sx.box([0.0] * heaters, [1.0] * heaters),
+        sx.box([-2.0] * side * side, [2.0] * side * side),
+    )
+
+
 PATCHES = (0.25, 0.5, 0.75)
 """Positions of the bare patches along the rod with hot spots, as fractions."""
 

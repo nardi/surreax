@@ -43,6 +43,7 @@ from surreax.implicit import (
     autoencoder_solver,
     fit_data,
     fit_implicit,
+    recommend_linear_solver,
     recommend_method,
     recommend_reduced_method,
     reduced_solver,
@@ -51,6 +52,7 @@ from surreax.implicit import (
 )
 from surreax.reduction import active_subspace_inputs, pca_inputs, pca_outputs
 from surreax.report import ErrorReport
+from surreax.sparse_solve import LinearSolver, residual_pattern
 from surreax.stencil import StencilResidual
 from surreax.strategy import (
     function_kinds,
@@ -86,6 +88,7 @@ __all__ = [
     "LatentReport",
     "LinearDecoder",
     "LinearForm",
+    "LinearSolver",
     "MaxAffine",
     "MaxAffineExport",
     "MaxAffineForm",
@@ -118,9 +121,11 @@ __all__ = [
     "prune_inputs",
     "recommend_block_forms",
     "recommend_form",
+    "recommend_linear_solver",
     "recommend_method",
     "recommend_reduced_method",
     "reduced_solver",
     "refine",
+    "residual_pattern",
     "root_find",
 ]

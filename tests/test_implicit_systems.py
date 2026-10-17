@@ -33,6 +33,7 @@ _SOLVABLE: dict[str, Callable[[], systems.ImplicitSystem]] = {
     "resistor_network": lambda: systems.resistor_network(8, 8),
     "diode_network": lambda: systems.diode_network(8, 8),
     "radiating_plate": lambda: systems.radiating_plate(8),
+    "radiating_block": lambda: systems.radiating_block(5),
 }
 
 

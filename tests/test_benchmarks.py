@@ -152,8 +152,10 @@ _NEWTON_SYSTEMS = {
     "rod": lambda: implicit_systems.radiating_rod(4096),
     "network": lambda: implicit_systems.diode_network(64, 64),
     "plate": lambda: implicit_systems.radiating_plate(64),
+    "block": lambda: implicit_systems.radiating_block(16),
 }
-"""Three nonlinear systems of 4,096 unknowns: a chain, a general graph, and a grid."""
+"""Four nonlinear systems of 4,096 unknowns: a chain, a general graph, a 2D grid and a 3D
+grid."""
 
 
 _HYBRID = splineax.HybridSettings(iterative=splineax.GMRESOptions(), tol=1e-6)
@@ -172,8 +174,8 @@ def test_benchmark_newton_solve_against_linear_solver(
     linear_solver: sx.LinearSolver,
     reuse: splineax.HybridSettings | None,
 ) -> None:
-    # Six Newton steps for eight inputs. The hybrid should only pay off where the
-    # factorization fills in, as on the plate.
+    # Six Newton steps for eight inputs. The hybrid only pays off where the
+    # factorization fills in heavily, as on the 3D block.
     with jax.enable_x64(True):
         built = _NEWTON_SYSTEMS[system]()
         unit = jax.random.uniform(jax.random.key(0), (8, built.domain.dimension))

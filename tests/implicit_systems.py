@@ -133,6 +133,43 @@ def radiating_plate(side: int, heaters: int = 4) -> ImplicitSystem:
     )
 
 
+def radiating_block(side: int, heaters: int = 4) -> ImplicitSystem:
+    """The radiating plate in 3D, a cube on a `side` by `side` by `side` grid.
+
+    Each point exchanges heat with its six grid neighbors, so the Jacobian has
+    seven nonzeros per row, and its factorization fills in far more than the
+    plate's as the grid grows.
+    """
+    points = side**3
+    layers, rest = np.divmod(np.arange(points), side * side)
+    rows, cols = np.divmod(rest, side)
+    offsets = ((0, 0, 0), (-1, 0, 0), (1, 0, 0), (0, -1, 0), (0, 1, 0), (0, 0, -1), (0, 0, 1))
+    shifts = np.array(offsets)
+    neighbor = np.stack([layers, rows, cols], axis=1)[:, None, :] + shifts[None, :, :]
+    inside = np.all((neighbor >= 0) & (neighbor < side), axis=2)
+    clipped = np.clip(neighbor, 0, side - 1)
+    index = (clipped[:, :, 0] * side + clipped[:, :, 1]) * side + clipped[:, :, 2]
+    stencil, mask = jnp.asarray(index), jnp.asarray(inside, dtype=float)
+    along = _heater_profiles(side, heaters)
+    across = _heater_profiles(side, 1)[0]
+    profiles = (along[:, :, None, None] * across[None, None, :, None] * across).reshape(
+        heaters, points
+    )
+
+    def entry(
+        x: Float[Array, " k"], i: Int[Array, ""], near: Float[Array, " 7"]
+    ) -> Float[Array, ""]:
+        here, *others = near * mask[i]
+        conduction = 6.0 * here - sum(others) + 0.5 * here
+        return conduction + _radiation(here) - x @ profiles[:, i]
+
+    return ImplicitSystem(
+        sx.StencilResidual(stencil=stencil, entry=entry),
+        sx.box([0.0] * heaters, [1.0] * heaters),
+        sx.box([-2.0] * points, [2.0] * points),
+    )
+
+
 PATCHES = (0.25, 0.5, 0.75)
 """Positions of the bare patches along the rod with hot spots, as fractions."""
 

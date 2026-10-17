@@ -239,10 +239,12 @@ scratch. A large implicit fit on CPU should turn x64 on at startup with
 
 A `reuse` setting, a `splineax.HybridSettings`, keeps the factorization of an
 earlier Newton step as the preconditioner of an iterative solve and only factors
-again when that solve is slow. It can only pay off where a factorization is
-expensive next to a solve. In the benchmarks at 4,096 unknowns it took about
-twelve times as long as refactoring on a rod, five times as long on a 64 by 64
-plate, and about the same time on a diode network, so it is off by default.
+again when that solve is slow. It only pays off where a factorization is
+expensive next to a solve, which is a 3D grid. In the benchmarks it took about
+five times as long as refactoring on 2D plates of 64, 128 and 256 points a side,
+but 0.85 times as long on a 16 by 16 by 16 block and 0.58 times on a 24 by 24 by
+24 block, since the factorization of a 3D grid fills in far more. It is off by
+default.
 
 ### Derivative supervision
 

@@ -1009,7 +1009,12 @@ def recommend_reduced_method(
 
 
 _SMALL_UNKNOWN = 32
-"""The largest unknown dimension treated as small, where a dense Jacobian is cheap."""
+"""The largest unknown dimension treated as small, where a dense Jacobian is cheap.
+
+Measured on the radiating rod and the latch ring, eight samples and six Newton
+steps in double precision: the dense step is faster at 32 unknowns and the
+sparse step at 64.
+"""
 
 
 def recommend_linear_solver(

@@ -13,6 +13,7 @@ from surreax.autoencoder import (
     LatentGuess,
 )
 from surreax.composite import CompositeSurrogate, fit_separable
+from surreax.degree import polynomial_degrees
 from surreax.domain import (
     Box,
     Categorical,
@@ -79,9 +80,11 @@ from surreax.sampling import Sampler
 from surreax.sparse_solve import LinearSolver, residual_pattern
 from surreax.stencil import StencilResidual
 from surreax.strategy import (
+    FitSettings,
     function_kinds,
     linear_energy,
     recommend_block_forms,
+    recommend_fit,
     recommend_form,
 )
 from surreax.structure import Structure, analyze, prune_inputs
@@ -103,6 +106,7 @@ __all__ = [
     "Domain",
     "ErrorReport",
     "ExactSolve",
+    "FitSettings",
     "FittedSurrogate",
     "FoldReport",
     "Grid",
@@ -155,9 +159,11 @@ __all__ = [
     "normal",
     "pca_inputs",
     "pca_outputs",
+    "polynomial_degrees",
     "product",
     "prune_inputs",
     "recommend_block_forms",
+    "recommend_fit",
     "recommend_form",
     "recommend_hyper_reduction",
     "recommend_linear_solver",

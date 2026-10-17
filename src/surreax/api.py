@@ -160,16 +160,23 @@ def fit(
     space. The report's worst-case error is searched from `worst_case_starts`
     random points, and setting that to zero skips the search. Passing `inputs`
     fits on those flat points instead of sampling the domain, which is how
-    adaptive sampling refits on a growing set. Leaving `form` out picks one from
-    the target's function kind, affine, polynomial, piecewise linear, or a
-    network for a discontinuity. `sampler` picks the sequence the samples follow.
+    adaptive sampling refits on a growing set. Leaving `form` out applies
+    `strategy.recommend_fit`, which picks a form from the target's function kind,
+    a polynomial degree from its jaxpr, and the reductions and sparse budget the
+    target calls for. An explicit `reduce_inputs`, `reduce_outputs` or
+    `sparse_terms` overrides the recommended one. `sampler` picks the sequence
+    the samples follow.
 
     Discrete coordinates, from integer and categorical domain leaves, stay out of
     derivative supervision and the derivative error, and an input reduction acts
     on the continuous coordinates only and passes the discrete ones through.
     """
     if form is None:
-        form = strategy.recommend_form(target, domain, samples=samples, seed=seed)
+        settings = strategy.recommend_fit(target, domain, samples=samples, seed=seed)
+        form = settings.form
+        reduce_inputs = reduce_inputs if reduce_inputs is not None else settings.reduce_inputs
+        reduce_outputs = reduce_outputs if reduce_outputs is not None else settings.reduce_outputs
+        sparse_terms = sparse_terms if sparse_terms is not None else settings.sparse_terms
     if inputs is None:
         inputs = sampling.sample(domain, samples, seed=seed, sampler=sampler)
     discrete = domain.discrete_mask

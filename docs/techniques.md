@@ -257,6 +257,34 @@ surrogate = sx.fit(target, domain, samples=256)
 assert float(surrogate.report.value_max) < 1e-3
 ```
 
+For a polynomial form the choice goes further, through `recommend_fit`. The
+degree comes from the target's jaxpr: `polynomial_degrees` walks the program and
+propagates a degree per value, so a cubic reads as degree three and anything
+with `sin` or a division by an input reads as not a polynomial. When a curved
+output is not a polynomial, the degree is the lowest at which raising it no
+longer halves the held-out error. An input reduction is added when the target
+varies along fewer directions than it has inputs, an output reduction when the
+outputs move together, and a sparse budget when the basis outgrows the samples.
+`recommend_fit` returns these as a `FitSettings`, and an explicit
+`reduce_inputs`, `reduce_outputs` or `sparse_terms` passed to `fit` wins over the
+recommended one.
+
+<!-- name: test_techniques_recommend_fit -->
+```python
+import jax.numpy as jnp
+import surreax as sx
+
+
+def target(x):
+    return jnp.array([x[0] ** 3 - x[0] * x[1]])
+
+
+domain = sx.box([-1.0, -1.0], [1.0, 1.0])
+assert sx.polynomial_degrees(target, domain) == (3,)
+settings = sx.recommend_fit(target, domain, samples=128)
+assert settings.form == sx.ChebyshevPolynomial(degree=3)
+```
+
 `fit_separable` chooses a form per block the same way when the form is omitted, so
 a target that is linear in one block and nonlinear in another gets a linear form
 on the first and a richer form on the second. `fit_implicit` chooses a method

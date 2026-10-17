@@ -1,10 +1,10 @@
 # Model forms
 
 A model form is the shape the surrogate is allowed to take. `surreax` fits the
-most accurate surrogate it can within that shape, so the form is your lever on
-the trade-off between accuracy and how easy the result is to reason about.
+most accurate surrogate it can within that shape, so choosing the form sets the
+trade-off between accuracy and how easy the result is to reason about.
 
-## What a form is
+## The form interface
 
 A form supplies a feature map. For a form that is linear in its parameters, the
 output is `weights @ features(x)`, one row of `weights` per output coordinate.
@@ -106,9 +106,8 @@ assert surrogate.report.structure_cost == 2
 
 Subtracting one convex max-affine function from another gives a general
 piecewise linear function, so this form fits a target that is not convex, which
-a single max-affine cannot. The fit also carries a convex-plus-concave
-decomposition, which some later algorithms rely on. There is a dedicated
-literature on fitting in this difference-of-convex form.
+a single max-affine cannot. The fit also carries the split into a convex and a
+concave part, which a difference-of-convex optimization algorithm works on.
 
 The difference is not convex and not linear in its parameters, so it fits by
 gradient descent through optimistix from several restarts, each started from a
@@ -190,13 +189,14 @@ assert float(surrogate.report.value_mean) < 0.02
 `export` returns a grid surrogate as its node coordinates and values, so a solver
 can encode the interpolation.
 
-## Handing a surrogate to a solver
+## Solver export
 
 The point of a piecewise linear form is that a solver can reason about it. A
 max-affine surrogate is a maximum of affine pieces, so it is a linear program,
 and a difference of two is a pair of them. `export` returns the slopes and
-intercepts as plain arrays, in the original coordinates, so you can write the
-encoding in whatever optimization framework you use. The library exports arrays
+intercepts as plain arrays, in the domain's flat coordinates, so you can write
+the encoding in whatever optimization framework you use. For a box those are the
+inputs themselves, and for a `LogRange` input it is its logarithm. The library exports arrays
 and nothing else, to stay free of a solver dependency. For the mixed-integer and
 linear-program encodings these arrays feed, see
 [OMLT](https://arxiv.org/abs/2202.02414).

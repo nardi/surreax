@@ -54,13 +54,13 @@ jacobian = jax.jacobian(surrogate)(jnp.array([0.5, 0.5]))
 assert jacobian.shape == (1, 2)
 ```
 
-## Why another surrogate library
+## Motivation
 
 There are good surrogate libraries already. `surreax` aims at a narrower target
 than most of them, which leads to a few different choices:
 
 1. It is built on JAX, so the target's exact Jacobian is available and cheap.
-   The error report uses it, and later versions train against it.
+   The error report uses it, and derivative supervision trains against it.
 2. It cares about the *form* of the result, not only its accuracy. The fitted
    object keeps the structure you asked for, so a downstream solver can use it.
 3. It fits in closed form wherever the form allows. The affine and polynomial
@@ -69,6 +69,6 @@ than most of them, which leads to a few different choices:
 4. It reports error by source, splitting the value error from the derivative
    error, because a surrogate can match values well and derivatives badly.
 
-For where this sits next to SMT, ALAMO, OMLT, and the physics-informed tools,
-see the [development notes](development.md).
+The [development notes](development.md) compare `surreax` with SMT, ALAMO,
+OMLT, and the physics-informed tools.
 ```

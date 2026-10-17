@@ -1,4 +1,4 @@
-# Getting started
+# The basic workflow
 
 This page walks through a full fit and the object it returns. The recommended
 import is `import surreax as sx`.
@@ -105,7 +105,7 @@ point = {
 assert jnp.allclose(surrogate(point), load(point), rtol=1e-3)
 ```
 
-## Fitting
+## The fit
 
 `fit` samples the domain with a low-discrepancy sequence, evaluates the target,
 and solves for the chosen form. A degree-five polynomial handles this target
@@ -134,7 +134,7 @@ assert float(report.value_mean) < 0.5
 assert jnp.isfinite(report.derivative_mean)
 ```
 
-## Calling the surrogate
+## The surrogate as a function
 
 The surrogate has the target's signature and evaluates in one step.
 

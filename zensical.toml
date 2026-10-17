@@ -8,7 +8,7 @@ repo_name = "nardi/surreax"
 
 nav = [
   { "Introduction" = "index.md" },
-  { "Getting started" = "getting-started.md" },
+  { "Basic workflow" = "getting-started.md" },
   { "Model forms" = "forms.md" },
   { "Fitting techniques" = "techniques.md" },
   { "Implicit targets" = "implicit.md" },

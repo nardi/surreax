@@ -2,12 +2,13 @@
 
 Sometimes you cannot write the target down. You have a residual `g(x, y)` and
 want `f` with `g(x, f(x))` near zero, but no closed form for `f`. `fit_implicit`
-handles this without solving `g = 0` at every point. You pass it a `method`
-object that picks the strategy, and it returns a fitted surrogate.
+fits one. You pass it a `method` object that picks the strategy, and it returns
+a fitted surrogate. Leaving the method out picks one from the residual, which
+needs an `unknown_domain` to draw unknowns from.
 
 ## The inverse map
 
-The default method inverts the residual in its second argument. Writing
+The `InverseMap` method inverts the residual in its second argument. Writing
 `r = g(x, y)`, the map `(x, y) -> (x, r)` is inverted to `y = h(x, r)`, and then
 `f(x) = h(x, 0)`. The inverse is cheap to sample. Draw `(x, y)`, evaluate
 `r = g(x, y)` forward, and the pair `((x, r), y)` is a labeled sample of `h`. So
@@ -72,8 +73,7 @@ assert float(surrogate.report.value_mean) < 0.5
 ```
 
 The residual the surrogate leaves is in `surrogate.report.value_mean`. A
-multi-solution residual needs the branch handling planned for a later version,
-so the current fit assumes a unique solution over the domain.
+residual with several solutions needs the branch handling of the next section.
 
 ## Branches and folds
 
@@ -167,11 +167,13 @@ point = jnp.array([2.0])
 assert float(jnp.abs(residual(point, solver(point))[0])) < 1e-5
 ```
 
-## Fitting from pairs
+## Pairs instead of a callable
 
 When you already hold input-output pairs rather than a callable, `fit_data`
 fits a linear form to them directly. It normalizes from the sample moments,
 since the pairs carry no domain box, and reports the held-out prediction error.
+Its domain comes from the data through `domain_from_data`, so the surrogate's
+`coverage` tells a query near the data from one in an empty part of the box.
 The inverse map uses it internally, and it is useful on its own for a distilled
 dataset.
 
@@ -194,10 +196,10 @@ assert float(surrogate.report.value_max) < 1e-3
 
 When the input is small but the unknown is large, a physical model discretized
 over many states, the `ExactSolve` method fits `f` at a scale the inverse map
-cannot reach. It rests on two facts. The residual Jacobian in the unknown is
-sparse, so the Newton solve is cheap when the sparsity is used, and `f` maps a
-small input to a large unknown, so the solved unknowns trace a manifold no wider
-than the input. `ExactSolve` solves `g = 0` at each sample, collapses the
+cannot reach. That works because the residual Jacobian in the unknown is
+sparse, so the Newton solve is cheap when the sparsity is used, and because `f`
+maps a small input to a large unknown, so the solved unknowns trace a manifold no
+wider than the input. `ExactSolve` solves `g = 0` at each sample, collapses the
 solved unknowns onto their leading principal directions, and fits the map into
 that small reduced space.
 
@@ -208,6 +210,35 @@ color. [splineax](https://github.com/nardi/splineax) then factors it with a
 sparse direct solver. A `StencilResidual` states its pattern in its stencil
 table, so it skips the tracing. The solve cost follows the number of nonzeros,
 not the square of the state size.
+
+Here the unknown is a field of 64 states coupled by a nearest-neighbor
+Laplacian, driven by three inputs, so the solution lives on a rank-3 manifold.
+
+<!-- name: test_implicit_exact_solve -->
+```python
+import jax
+import jax.numpy as jnp
+import surreax as sx
+
+grid = jnp.linspace(0.0, 1.0, 64)
+shapes = jnp.stack([jnp.sin(jnp.pi * grid), jnp.sin(2 * jnp.pi * grid), grid * (1 - grid)])
+
+
+def residual(x, y):
+    laplacian = -2.0 * y + jnp.roll(y, 1) + jnp.roll(y, -1)
+    return -laplacian + 0.5 * y - x @ shapes
+
+
+domain = sx.box([-1.0, -1.0, -1.0], [1.0, 1.0, 1.0])
+method = sx.ExactSolve(
+    form=sx.Affine(), unknown_domain=sx.box([-3.0] * 64, [3.0] * 64), rank=3, newton_steps=5
+)
+surrogate = sx.fit_implicit(residual, domain, method, samples=128)
+
+# The 64 unknowns are predicted through 3 reduced coefficients.
+assert surrogate.output_reduction.encode_matrix.shape[0] == 3
+assert float(surrogate.report.value_mean) < 1e-3
+```
 
 ### Linear solvers
 
@@ -253,35 +284,6 @@ reduced coefficients in the input. The implicit function theorem gives it from
 one transposed solve per coefficient at each solved sample, reusing the solver of
 the Newton steps, so the full Jacobian of the unknown is never formed.
 
-Here the unknown is a field of 64 states coupled by a nearest-neighbor
-Laplacian, driven by three inputs, so the solution lives on a rank-3 manifold.
-
-<!-- name: test_implicit_exact_solve -->
-```python
-import jax
-import jax.numpy as jnp
-import surreax as sx
-
-grid = jnp.linspace(0.0, 1.0, 64)
-shapes = jnp.stack([jnp.sin(jnp.pi * grid), jnp.sin(2 * jnp.pi * grid), grid * (1 - grid)])
-
-
-def residual(x, y):
-    laplacian = -2.0 * y + jnp.roll(y, 1) + jnp.roll(y, -1)
-    return -laplacian + 0.5 * y - x @ shapes
-
-
-domain = sx.box([-1.0, -1.0, -1.0], [1.0, 1.0, 1.0])
-method = sx.ExactSolve(
-    form=sx.Affine(), unknown_domain=sx.box([-3.0] * 64, [3.0] * 64), rank=3, newton_steps=5
-)
-surrogate = sx.fit_implicit(residual, domain, method, samples=128)
-
-# The 64 unknowns are predicted through 3 reduced coefficients.
-assert surrogate.output_reduction.encode_matrix.shape[0] == 3
-assert float(surrogate.report.value_mean) < 1e-3
-```
-
 ## The reduced-order model
 
 `ExactSolve` solves the full residual once per sample. When many samples are
@@ -289,16 +291,16 @@ needed, or the solve is to be reused online, `ReducedSolve` solves in a small
 latent space instead. It builds a proper orthogonal decomposition basis from a
 few solved snapshots, projects the residual onto that basis in the manner of
 Galerkin, and solves the reduced residual by Newton in the latent. Each reduced
-step is an `r` by `r` solve, independent of the unknown size. The snapshot
-solves use the `linear_solver` of the previous section. It then distills
+step is an `r` by `r` solve, independent of the unknown size, and the snapshot
+solves use the `linear_solver` of the previous section. The method then distills
 the input-to-latent map into an explicit surrogate, so inference needs no solve.
 This is the non-intrusive reduced-order model, POD-NN, of Hesthaven and Ubbiali,
 [POD-NN](https://doi.org/10.1016/j.jcp.2018.02.037).
 
 The basis is linear here, which suits a solution manifold whose Kolmogorov
-n-width decays fast. A strongly nonlinear manifold needs a nonlinear autoencoder
-basis, which is not built yet. The latent dimension is the `rank`, and the
-residual falls as it reaches the intrinsic dimension of the manifold.
+n-width decays fast. A strongly curved manifold needs the learned manifold of a
+later section. The latent dimension is the `rank`, and the residual falls as it
+reaches the intrinsic dimension of the manifold.
 
 Setting `greedy` chooses the snapshots one at a time where the current basis
 leaves the most residual, rather than taking the first `snapshots` samples, so it
@@ -420,7 +422,7 @@ assert float(solver.training_residual) < 0.2
 assert solver(jnp.array([0.4, -0.2])).shape == (32,)
 ```
 
-### A moving front, and when to leave the linear basis
+### A moving front and the limit of the linear basis
 
 Some manifolds are hard to reach from the residual alone. Picture fluid in a pipe
 flowing past a heater you can slide along it. The fluid is cold before the heater
@@ -527,6 +529,14 @@ stencils would read more than half the state. Otherwise it hyper-reduces and
 checks the result on held-out inputs. It keeps the hyper-reduced solver only if
 the residual it leaves is at most `tolerance` times that of the full solver,
 1.2 by default.
+
+## Equations that hold exactly
+
+The methods above leave every equation of the residual approximately satisfied.
+`sx.Completed(method, constraint)` wraps any of them so that a chosen subset of
+the equations holds to solver precision, by solving the outputs those equations
+determine at call time. The [equality constraints](techniques.md#equality-constraints)
+section describes the completion.
 
 ## The objective route
 

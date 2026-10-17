@@ -74,7 +74,7 @@ error, the accuracy the reduction gives up before any fitting.
 
 A total-degree polynomial basis grows as the number of inputs and the degree
 rise, and most of its coefficients should be zero. A sparse fit keeps only the
-terms that matter, which tames that growth and lowers the structure cost. This
+terms that matter, which limits that growth and lowers the structure cost. This
 is the route ALAMO takes, from Cozad, Sahinidis, and Miller, [Learning
 surrogate models for simulation-based
 optimization](https://doi.org/10.1002/aic.14418), AIChE Journal 60, 2014.
@@ -188,8 +188,8 @@ assert surrogate.input_reduction.encode_matrix.shape == (2, 5)
 assert float(surrogate.report.value_max) < 1e-3
 ```
 
-`analyze` returns the same reading as a report: the coupling matrix and the
-block labels that split outputs and inputs into independent groups, so a
+`analyze` returns the same reading as a report. It holds the coupling matrix and
+the block labels that split outputs and inputs into independent groups, so a
 separable target reads as separate blocks.
 
 <!-- name: test_techniques_analyze -->
@@ -226,7 +226,7 @@ import surreax as sx
 
 
 def target(x):
-    # Two independent blocks: a linear one and a nonlinear one.
+    # Two independent blocks, a linear one and a nonlinear one.
     return jnp.array([2 * x[0] - 1.0, jnp.sin(3 * x[1])])
 
 
@@ -286,8 +286,8 @@ same way, so a subset of the residual's equations holds exactly.
 
 The structural analysis can also choose the form for you. Leaving the form out of
 `fit` reads the function kind of each output, affine, polynomial, piecewise
-linear, or discontinuous, and picks a form to match. It is advisory and always
-overridable, so pass a form to override it.
+linear, or discontinuous, and picks a form to match. The choice is advisory, so
+a form you pass always wins.
 
 <!-- name: test_techniques_auto_form -->
 ```python
@@ -306,7 +306,7 @@ assert float(surrogate.report.value_max) < 1e-3
 ```
 
 For a polynomial form the choice goes further, through `recommend_fit`. The
-degree comes from the target's jaxpr: `polynomial_degrees` walks the program and
+degree comes from the target's jaxpr, which `polynomial_degrees` walks while it
 propagates a degree per value, so a cubic reads as degree three and anything
 with `sin` or a division by an input reads as not a polynomial. When a curved
 output is not a polynomial, the degree is the lowest at which raising it no

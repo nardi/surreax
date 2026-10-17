@@ -6,11 +6,12 @@ slopes and intercepts lets a user write that encoding in whatever optimization
 framework they already use. The library exports arrays and nothing else, to keep
 free of any solver dependency.
 
-The exported arrays are in the caller's original coordinates. The input
+The exported arrays are in the domain's flat coordinates, the input itself for
+a box and its logarithm for a `LogRange`. The input
 normalization and reduction fold into the slopes and intercepts, and the output
 normalization folds into them too, so the pieces act on the unnormalized input
 and produce the unnormalized output. This needs an identity output reduction, so
-the outputs are not mixed; a reduced output space is refused.
+the outputs are not mixed, and a reduced output space is refused.
 
 The mixed-integer and linear-program encodings these arrays feed are the ones
 OMLT builds, from Ceccon and colleagues,

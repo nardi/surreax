@@ -13,8 +13,8 @@ function and a region where the surrogate should be accurate, and it returns a
 second function that behaves approximately like the first one, but has a form
 you chose in advance.
 
-The form is the point. Some forms are easy to reason about after you fit them.
-A piecewise linear surrogate can be handed to a mixed-integer solver. A convex
+You fix the form up front because some forms are easy to reason about after you
+fit them. A piecewise linear surrogate can be handed to a mixed-integer solver. A convex
 surrogate can be minimized reliably. A general neural network can do neither.
 `surreax` treats the form as the thing you care about, and accuracy as the
 thing to maximize once the form is fixed.
@@ -52,7 +52,7 @@ jacobian = jax.jacobian(surrogate)(jnp.array([0.5, 0.5]))
 assert jacobian.shape == (1, 2)
 ```
 
-## Why?
+## Motivation
 
 There are good surrogate libraries already. `surreax` aims at a narrower goal,
 which leads to a few different choices:
@@ -66,14 +66,24 @@ which leads to a few different choices:
 
 ## Status
 
-`surreax` fits explicit targets over a box, with the affine, Chebyshev
-polynomial, convex max-affine, difference-of-max-affine, and feedforward network
-forms. It can train against target derivatives, fit in a reduced space through
-PCA or an active subspace, select a sparse basis by matching pursuit, and add
-samples where the fit is worst. The report separates value, derivative, and
-projection error, searches the worst case over the domain, and gives the
-structure cost. It also fits implicit targets given as a residual `g(x, y)`,
-through the inverse map, without solving `g = 0`.
+`surreax` fits explicit targets with the affine, Chebyshev polynomial, convex
+max-affine, difference-of-max-affine, grid, and feedforward network forms, and
+exports the piecewise linear ones as arrays for a solver. A domain can mix boxes
+with log-scaled, normal, integer, and categorical inputs, or be inferred from a
+dataset, in which case the surrogate reports how far a query lies from the data.
+
+A fit can train against target derivatives and work in a reduced space, found by
+PCA, an active subspace, or exact pruning. It can select a sparse basis by
+matching pursuit, split a separable target into blocks, add samples where it is
+worst, and hold an equality constraint exactly. Leaving the form out picks the form, its polynomial
+degree, the reductions, and the sparse budget from the target itself. The report
+separates value, derivative, and projection error, searches the worst case over
+the domain, and gives the structure cost.
+
+It also fits implicit targets given as a residual `g(x, y)`. The methods are the
+inverse map, a direct sparse Newton solve with output reduction, a linear
+reduced-order model, and a manifold learned from the residual alone.
+Hyper-reduction makes the online solve read only a few entries of the residual.
 
 ## Development
 

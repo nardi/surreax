@@ -241,6 +241,47 @@ assert float(surrogate.report.projection_max) < 1e-5
 assert surrogate.report.value_max <= surrogate.report.worst_case < 5e-2
 ```
 
+## Equality constraints
+
+A surrogate breaks a known equation, such as a mass balance, by its fit error.
+`fit_constrained` makes it hold exactly instead. A `Constraint` names an equation
+`h(x, y) = 0` and the flat outputs it determines, as many as it has equations.
+The surrogate predicts the other outputs, and the dependent ones are solved from
+the equation at call time, by Newton from the fit's own prediction of them. This
+is the completion of DC3 by Donti, Rolnick and Kolter. An equation that is affine
+in the dependent outputs completes in one step. The derivative comes from the
+implicit function theorem, so the completed surrogate differentiates exactly. A
+choice of dependent outputs the equation does not determine is rejected at fit
+time.
+
+<!-- name: test_techniques_constraint -->
+```python
+import jax
+import jax.numpy as jnp
+import surreax as sx
+
+
+def flows(x):
+    first = x[0] * jnp.sin(x[1]) ** 2 / 2
+    second = x[0] * jnp.cos(x[1]) * x[1] / 3
+    return jnp.stack([first, second, jnp.exp(x[0]) - first - second])
+
+
+def balance(x, y):
+    return (jnp.sum(y) - jnp.exp(x[0]))[None]
+
+
+domain = sx.box([0.5, 0.0], [2.0, 1.5])
+constraint = sx.Constraint(balance, dependent=(2,))
+surrogate = sx.fit_constrained(flows, domain, constraint, sx.ChebyshevPolynomial(degree=3))
+points = domain.sample_unit(jax.random.uniform(jax.random.key(0), (16, 2)))
+# The balance holds to solver precision, not to the fit error.
+assert float(jnp.max(sx.constraint_residuals(surrogate, constraint, points))) < 1e-5
+```
+
+In implicit mode, `sx.Completed(method, constraint)` wraps any other method the
+same way, so a subset of the residual's equations holds exactly.
+
 ## Automatic strategy selection
 
 The structural analysis can also choose the form for you. Leaving the form out of

@@ -35,6 +35,7 @@ from surreax.autoencoder import (
     DecodedSurrogate,
     train_autoencoder,
 )
+from surreax.completion import CompletedSurrogate, Constraint, complete
 from surreax.domain import Box, Domain, domain_from_data
 from surreax.fitted import FittedSurrogate
 from surreax.fitting import LinearModel, fit_linear, fit_linear_sobolev
@@ -1063,10 +1064,61 @@ def recommend_method(
     )
 
 
+BaseMethod = InverseMap | Objective | ExactSolve | ReducedSolve | AutoencoderSolve
+"""The implicit methods that fit a surrogate on their own."""
+
+
+class Completed(eqx.Module):
+    """Fit through another method, then satisfy an equality constraint exactly.
+
+    The inner `method` fits every output, and the result is wrapped so that the
+    dependent outputs the constraint names are solved from it at call time, see
+    `completion`. The constraint then holds to solver precision, while the full
+    residual stays as accurate as the inner method leaves it.
+    """
+
+    method: BaseMethod
+    constraint: Constraint
+
+
+BaseSurrogate = ImplicitSurrogate | FittedSurrogate | DecodedSurrogate | CompletedSurrogate
+"""What a method returns before any refinement."""
+
+
+def _fit_method(
+    residual: Residual,
+    domain: Domain,
+    train_inputs: Float[Array, "n d"],
+    method: BaseMethod | Completed,
+    holdout: float,
+    ridge: float,
+    seed: int,
+) -> BaseSurrogate:
+    """Fit a surrogate through one method on the training inputs."""
+    match method:
+        case InverseMap():
+            return _fit_inverse_map(residual, train_inputs, method, holdout, ridge)
+        case Objective():
+            return _fit_objective(residual, domain, train_inputs, method)
+        case ExactSolve():
+            return _fit_exact_solve(residual, train_inputs, method, holdout, ridge)
+        case ReducedSolve():
+            return _fit_reduced_order(residual, train_inputs, method, holdout, ridge)
+        case AutoencoderSolve():
+            return _fit_autoencoder(residual, domain, train_inputs, method, holdout, ridge, seed)
+        case Completed():
+            inner = _fit_method(
+                residual, domain, train_inputs, method.method, holdout, ridge, seed
+            )
+            return complete(inner, method.constraint, train_inputs, inner.report)
+        case _:
+            raise TypeError(f"unsupported implicit method: {type(method).__name__}")
+
+
 def fit_implicit(
     residual: Residual,
     domain: Domain,
-    method: InverseMap | Objective | ExactSolve | ReducedSolve | AutoencoderSolve | None = None,
+    method: BaseMethod | Completed | None = None,
     *,
     unknown_domain: Domain | None = None,
     samples: int = 512,
@@ -1075,7 +1127,7 @@ def fit_implicit(
     refine_steps: int = 0,
     sampler: sampling.Sampler = "sobol",
     seed: int = 0,
-) -> ImplicitSurrogate | FittedSurrogate | DecodedSurrogate | RefinedSurrogate:
+) -> BaseSurrogate | RefinedSurrogate:
     """Fit a surrogate `f` with `residual(x, f(x))` near zero, through a method.
 
     Samples the domain, builds the surrogate through the strategy `method`, and
@@ -1097,25 +1149,8 @@ def fit_implicit(
     holdout_count = max(1, round(samples * holdout))
     train_inputs, holdout_inputs = inputs[:-holdout_count], inputs[-holdout_count:]
 
-    match method:
-        case InverseMap():
-            base: ImplicitSurrogate | FittedSurrogate | DecodedSurrogate = _fit_inverse_map(
-                residual, train_inputs, method, holdout, ridge
-            )
-        case Objective():
-            base = _fit_objective(residual, domain, train_inputs, method)
-        case ExactSolve():
-            base = _fit_exact_solve(residual, train_inputs, method, holdout, ridge)
-        case ReducedSolve():
-            base = _fit_reduced_order(residual, train_inputs, method, holdout, ridge)
-        case AutoencoderSolve():
-            base = _fit_autoencoder(
-                residual, domain, train_inputs, method, holdout, ridge, seed
-            )
-        case _:
-            raise TypeError(f"unsupported implicit method: {type(method).__name__}")
-
-    surrogate: ImplicitSurrogate | FittedSurrogate | DecodedSurrogate | RefinedSurrogate = base
+    base = _fit_method(residual, domain, train_inputs, method, holdout, ridge, seed)
+    surrogate: BaseSurrogate | RefinedSurrogate = base
     if refine_steps > 0:
         surrogate = refine(base, residual, steps=refine_steps)
 

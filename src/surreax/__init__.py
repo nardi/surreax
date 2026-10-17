@@ -4,7 +4,7 @@
 returns a `FittedSurrogate` that keeps the chosen form.
 """
 
-from surreax.api import Target, fit, fit_adaptive
+from surreax.api import Target, fit, fit_adaptive, fit_constrained
 from surreax.autoencoder import (
     Autoencoder,
     AutoencoderSolve,
@@ -12,6 +12,7 @@ from surreax.autoencoder import (
     DecodedSurrogate,
     LatentGuess,
 )
+from surreax.completion import CompletedSurrogate, Constraint, constraint_residuals
 from surreax.composite import CompositeSurrogate, fit_separable
 from surreax.degree import polynomial_degrees
 from surreax.domain import (
@@ -54,6 +55,7 @@ from surreax.hyperreduction import (
     recommend_hyper_reduction,
 )
 from surreax.implicit import (
+    Completed,
     ExactSolve,
     FoldReport,
     ImplicitSurrogate,
@@ -97,7 +99,10 @@ __all__ = [
     "Box",
     "Categorical",
     "ChebyshevPolynomial",
+    "Completed",
+    "CompletedSurrogate",
     "CompositeSurrogate",
+    "Constraint",
     "DataDomain",
     "DecodedSurrogate",
     "DifferenceExport",
@@ -143,11 +148,13 @@ __all__ = [
     "box",
     "box_from_data",
     "categorical",
+    "constraint_residuals",
     "coverage",
     "domain_from_data",
     "export",
     "fit",
     "fit_adaptive",
+    "fit_constrained",
     "fit_data",
     "fit_implicit",
     "fit_separable",

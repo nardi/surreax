@@ -15,6 +15,7 @@ import numpy as np
 from jaxtyping import Array, Float, PyTree
 
 from surreax import normalize, reduction, sampling, strategy
+from surreax.completion import CompletedSurrogate, Constraint, complete
 from surreax.domain import Domain, coverage
 from surreax.error_search import high_error_points, worst_case
 from surreax.fitted import FittedSurrogate
@@ -417,3 +418,60 @@ def fit_adaptive(
             seed=seed,
         )
     return surrogate
+
+
+def fit_constrained(
+    target: Target,
+    domain: Domain,
+    constraint: Constraint,
+    form: LinearForm | MaxAffineForm | DifferenceOfMaxAffineForm | NetworkForm | None = None,
+    *,
+    samples: int = 512,
+    holdout: float = 0.2,
+    ridge: float = 1e-8,
+    derivative_weight: float = 0.0,
+    sampler: sampling.Sampler = "sobol",
+    seed: int = 0,
+) -> CompletedSurrogate:
+    """Fit a surrogate that satisfies an equality constraint by construction.
+
+    Fits every output with `fit`, then wraps the result so that the dependent
+    outputs the constraint names are solved from it at call time, see
+    `completion`. The fitted free outputs are unchanged, and the dependent ones
+    satisfy the constraint to solver precision. The report measures the
+    completed surrogate on the held-out points.
+    """
+    inputs = sampling.sample(domain, samples, seed=seed, sampler=sampler)
+    base = fit(
+        target,
+        domain,
+        form,
+        holdout=holdout,
+        ridge=ridge,
+        derivative_weight=derivative_weight,
+        inputs=inputs,
+        seed=seed,
+    )
+    holdout_count = max(1, round(inputs.shape[0] * holdout))
+    train_inputs, holdout_inputs = inputs[:-holdout_count], inputs[-holdout_count:]
+    completed = complete(base, constraint, jax.vmap(domain.unravel)(train_inputs), base.report)
+
+    def flat_completed(point: Float[Array, " d"]) -> Float[Array, " k"]:
+        return ravel(completed(domain.unravel(point)))
+
+    def flat_target(point: Float[Array, " d"]) -> Float[Array, " k"]:
+        return ravel(target(domain.unravel(point)))
+
+    value = jnp.linalg.norm(
+        jax.vmap(flat_completed)(holdout_inputs) - jax.vmap(flat_target)(holdout_inputs), axis=1
+    )
+    continuous = jnp.asarray(np.flatnonzero(~domain.discrete_mask), dtype=int)
+    slope = jax.vmap(jax.jacobian(flat_completed))(holdout_inputs)[:, :, continuous]
+    true_slope = jax.vmap(jax.jacobian(flat_target))(holdout_inputs)[:, :, continuous]
+    derivative = jnp.linalg.norm((slope - true_slope).reshape(holdout_inputs.shape[0], -1), axis=1)
+    report = eqx.tree_at(
+        lambda r: (r.value_mean, r.value_max, r.derivative_mean, r.derivative_max),
+        base.report,
+        (jnp.mean(value), jnp.max(value), jnp.mean(derivative), jnp.max(derivative)),
+    )
+    return eqx.tree_at(lambda s: s.report, completed, report)

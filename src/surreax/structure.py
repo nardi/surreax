@@ -100,7 +100,9 @@ def analyze(
     """Read the dependency structure of a target over a domain.
 
     Samples the domain, takes the target Jacobian at each point, and returns the
-    coupling matrix and the block labels. The analysis is advisory.
+    coupling matrix and the block labels. The analysis is advisory. The Jacobian
+    cannot see a discrete coordinate, so each one is treated as coupled to every
+    output, which keeps it in the fit rather than pruning it.
     """
     inputs = sampling.sample(domain, samples, seed=seed)
 
@@ -109,5 +111,8 @@ def analyze(
 
     jacobians = jax.vmap(jax.jacobian(flat_target))(inputs)
     coupling = coupling_matrix(jacobians)
+    discrete = domain.discrete_mask
+    if discrete.any():
+        coupling = coupling.at[:, np.flatnonzero(discrete)].set(jnp.max(coupling))
     input_block, output_block = _blocks(coupling, tolerance)
     return Structure(coupling=coupling, input_block=input_block, output_block=output_block)

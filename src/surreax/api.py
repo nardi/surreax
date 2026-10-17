@@ -11,6 +11,7 @@ from collections.abc import Callable
 import equinox as eqx
 import jax
 import jax.numpy as jnp
+import numpy as np
 from jaxtyping import Array, Float, PyTree
 
 from surreax import normalize, reduction, sampling, strategy
@@ -77,11 +78,14 @@ def _error_report(
     structure_cost: int,
     worst_case_value: Float[Array, ""],
     worst_case_point: Float[Array, " d"],
+    continuous_columns: tuple[int, ...] | None,
 ) -> ErrorReport:
     """Measure value and derivative error against the target on held-out points.
 
     Both functions take a pytree input, so they are composed with `unravel` to
-    run in the flat input space the held-out points live in.
+    run in the flat input space the held-out points live in. The derivative error
+    reads only `continuous_columns` when given, since the target has no useful
+    derivative in a discrete coordinate.
     """
 
     def flat_surrogate(point: Float[Array, " d"]) -> Float[Array, " k"]:
@@ -96,6 +100,10 @@ def _error_report(
 
     surrogate_jacobian = jax.vmap(jax.jacobian(flat_surrogate))(inputs)
     target_jacobian = jax.vmap(jax.jacobian(flat_target))(inputs)
+    if continuous_columns is not None:
+        columns = jnp.asarray(continuous_columns, dtype=int)
+        surrogate_jacobian = surrogate_jacobian[:, :, columns]
+        target_jacobian = target_jacobian[:, :, columns]
     sample_count = inputs.shape[0]
     jacobian_residual = jnp.linalg.norm(
         (surrogate_jacobian - target_jacobian).reshape(sample_count, -1), axis=1
@@ -136,6 +144,7 @@ def fit(
     worst_case_rate: float = 0.05,
     inputs: Float[Array, "n d"] | None = None,
     warm_start: FittedSurrogate | None = None,
+    sampler: sampling.Sampler = "sobol",
     seed: int = 0,
 ) -> FittedSurrogate:
     """Fit a surrogate of `form` to `target` over `domain`.
@@ -151,12 +160,17 @@ def fit(
     fits on those flat points instead of sampling the domain, which is how
     adaptive sampling refits on a growing set. Leaving `form` out picks one from
     the target's function kind, affine, polynomial, piecewise linear, or a
-    network for a discontinuity.
+    network for a discontinuity. `sampler` picks the sequence the samples follow.
+
+    Discrete coordinates, from integer and categorical domain leaves, stay out of
+    derivative supervision and the derivative error, and an input reduction acts
+    on the continuous coordinates only and passes the discrete ones through.
     """
     if form is None:
         form = strategy.recommend_form(target, domain, samples=samples, seed=seed)
     if inputs is None:
-        inputs = sampling.sample(domain, samples, seed=seed)
+        inputs = sampling.sample(domain, samples, seed=seed, sampler=sampler)
+    discrete = domain.discrete_mask
     holdout_count = max(1, round(inputs.shape[0] * holdout))
     train_inputs = inputs[:-holdout_count]
     holdout_inputs = inputs[-holdout_count:]
@@ -171,12 +185,22 @@ def fit(
     input_dimension = inputs.shape[1]
     output_dimension = flat_outputs.shape[1]
 
+    # The derivative columns are the continuous coordinates in the model's input
+    # space, or None when every coordinate is continuous.
+    continuous_columns = tuple(int(i) for i in np.flatnonzero(~discrete))
+    derivative_columns = continuous_columns if discrete.any() else None
     if reduce_inputs is None:
         input_reduction = reduction.identity(input_dimension)
     else:
         flat_target = functools.partial(_flat_target, target=target, domain=domain)
         train_jacobians = jax.vmap(jax.jacobian(flat_target))(train_inputs)
-        input_reduction = reduce_inputs(train_inputs, train_jacobians)
+        if discrete.any():
+            continuous = ~discrete
+            built = reduce_inputs(train_inputs[:, continuous], train_jacobians[:, :, continuous])
+            input_reduction = reduction.embed_continuous(built, discrete)
+            derivative_columns = tuple(range(built.encode_matrix.shape[0]))
+        else:
+            input_reduction = reduce_inputs(train_inputs, train_jacobians)
     output_reduction = (
         reduction.identity(output_dimension)
         if reduce_outputs is None
@@ -229,6 +253,7 @@ def fit(
                     target_jacobians,
                     ridge=ridge,
                     derivative_weight=derivative_weight,
+                    derivative_columns=derivative_columns,
                 )
             else:
                 model = fit_linear(form, normalized_inputs, normalized_outputs, ridge=ridge)
@@ -260,6 +285,7 @@ def fit(
                 key=jax.random.key(seed),
                 jacobians=target_jacobians,
                 derivative_weight=derivative_weight,
+                derivative_columns=derivative_columns,
                 initial=previous if isinstance(previous, Network) else None,
             )
             structure_cost = parameter_count(model)
@@ -308,6 +334,7 @@ def fit(
         structure_cost,
         worst_case_value,
         worst_case_point,
+        continuous_columns if discrete.any() else None,
     )
     return eqx.tree_at(lambda s: s.report, surrogate, report)
 
@@ -327,6 +354,7 @@ def fit_adaptive(
     worst_case_starts: int = 8,
     worst_case_steps: int = 200,
     worst_case_rate: float = 0.05,
+    sampler: sampling.Sampler = "sobol",
     seed: int = 0,
 ) -> FittedSurrogate:
     """Fit while adding samples where the surrogate is worst.
@@ -337,7 +365,7 @@ def fit_adaptive(
     `rounds`. Because the target is callable, the sample is not a fixed resource,
     so this spends points where the fit needs them.
     """
-    inputs = sampling.sample(domain, initial_samples, seed=seed)
+    inputs = sampling.sample(domain, initial_samples, seed=seed, sampler=sampler)
     surrogate = fit(
         target,
         domain,

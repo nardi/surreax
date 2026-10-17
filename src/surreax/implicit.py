@@ -35,7 +35,7 @@ from surreax.autoencoder import (
     DecodedSurrogate,
     train_autoencoder,
 )
-from surreax.domain import Domain, box_from_data
+from surreax.domain import Box, Domain, box_from_data
 from surreax.fitted import FittedSurrogate
 from surreax.fitting import LinearModel, fit_linear, fit_linear_sobolev
 from surreax.flatten import ravel_example
@@ -1062,6 +1062,7 @@ def fit_implicit(
     holdout: float = 0.2,
     ridge: float = 1e-8,
     refine_steps: int = 0,
+    sampler: sampling.Sampler = "sobol",
     seed: int = 0,
 ) -> ImplicitSurrogate | FittedSurrogate | DecodedSurrogate | RefinedSurrogate:
     """Fit a surrogate `f` with `residual(x, f(x))` near zero, through a method.
@@ -1070,14 +1071,18 @@ def fit_implicit(
     reports the residual the surrogate leaves on held-out inputs. A positive
     `refine_steps` polishes each prediction with Newton steps on the residual at
     call time, which every method's result can use. Leaving `method` out picks
-    one from the residual's structure, which needs `unknown_domain`.
+    one from the residual's structure, which needs `unknown_domain`. The residual
+    takes the input as a flat array, so the domain must be a `Box`. `sampler`
+    picks the sequence the samples follow.
     """
+    if not isinstance(domain, Box):
+        raise TypeError("fit_implicit needs a Box domain")
     if method is None:
         if unknown_domain is None:
             raise ValueError("fit_implicit needs a method or an unknown_domain to recommend one")
         method = recommend_method(residual, domain, unknown_domain, seed=seed)
 
-    inputs = sampling.sample(domain, samples, seed=seed)
+    inputs = sampling.sample(domain, samples, seed=seed, sampler=sampler)
     holdout_count = max(1, round(samples * holdout))
     train_inputs, holdout_inputs = inputs[:-holdout_count], inputs[-holdout_count:]
 

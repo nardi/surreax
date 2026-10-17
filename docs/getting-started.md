@@ -36,6 +36,54 @@ domain = sx.box([5.0, 0.2], [20.0, 1.3])
 If you already have a dataset of inputs, `sx.box_from_data(points)` infers the
 tightest box that contains them.
 
+### Other input kinds
+
+Not every input is a plain range. `sx.product` takes a pytree of leaf domains
+that mirrors the target's input, and each leaf samples its own way.
+
+- `sx.log_range(lower, upper)` samples uniformly in the logarithm, for an input
+  that spans orders of magnitude. The model works on the logarithm too.
+- `sx.normal(mean, std)` samples a normal distribution, cut at four standard
+  deviations so the domain stays bounded.
+- `sx.integer(lower, upper)` samples integers, both bounds included.
+- `sx.categorical(choices)` picks one of a set of options, stacked along the first
+  axis.
+
+Integer and categorical inputs are discrete. Derivative supervision and the
+derivative error leave them out, an input reduction passes them through
+unchanged, and the worst-case search only reports points with valid values.
+`fit` also takes a `sampler`, `"sobol"` by default, or `"halton"` or
+`"latin_hypercube"`.
+
+<!-- name: test_start_mixed_domain -->
+```python
+import jax.numpy as jnp
+import surreax as sx
+
+
+def load(inputs):
+    speed, density, panels = inputs["speed"][0], inputs["density"][0], inputs["panels"][0]
+    return (inputs["shape"] * panels * speed**2 + jnp.log10(density))[None]
+
+
+domain = sx.product(
+    {
+        "speed": sx.box([1.0], [10.0]),
+        "density": sx.log_range([0.1], [10.0]),
+        "panels": sx.integer([1], [4]),
+        "shape": sx.categorical([0.5, 1.2]),
+    }
+)
+surrogate = sx.fit(load, domain, sx.ChebyshevPolynomial(degree=4), samples=512)
+point = {
+    "speed": jnp.array([5.0]),
+    "density": jnp.array([1.0]),
+    "panels": jnp.array([2.0]),
+    "shape": jnp.array(1.2),
+}
+assert jnp.allclose(surrogate(point), load(point), rtol=1e-3)
+```
+
 ## Fitting
 
 `fit` samples the domain with a low-discrepancy sequence, evaluates the target,

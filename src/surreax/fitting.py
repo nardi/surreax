@@ -80,18 +80,24 @@ def fit_linear_sobolev(
     *,
     ridge: float,
     derivative_weight: float,
+    derivative_columns: tuple[int, ...] | None = None,
 ) -> LinearModel:
     """Fit against values and Jacobians together.
 
     The value equations `weights @ features(x) = target` stack above the
     derivative equations `weights @ jacobian(features)(x) = jacobian(target)`,
     weighted by `derivative_weight`, and the whole system is one least squares
-    solve.
+    solve. `derivative_columns` limits the derivative equations to those input
+    coordinates, which leaves discrete coordinates out.
     """
     output_count = targets.shape[1]
     design = jax.vmap(form.features)(inputs)
     feature_count = design.shape[1]
     feature_jacobians = jax.vmap(jax.jacobian(form.features))(inputs)
+    if derivative_columns is not None:
+        columns = jnp.asarray(derivative_columns, dtype=int)
+        feature_jacobians = feature_jacobians[:, :, columns]
+        jacobians = jacobians[:, :, columns]
 
     # Each derivative equation is weights @ Jphi = Jtarget. Transposing to
     # Jphi.T @ weights.T = Jtarget.T puts it in the same shape as the value

@@ -11,7 +11,7 @@ from jaxtyping import Array, PyTree
 
 from surreax.domain import Domain
 from surreax.fitting import LinearModel
-from surreax.flatten import Unraveler, ravel
+from surreax.flatten import Unraveler
 from surreax.forms.difference_max_affine import DifferenceOfMaxAffine
 from surreax.forms.max_affine import MaxAffine
 from surreax.forms.network import Network
@@ -37,7 +37,7 @@ class FittedSurrogate(eqx.Module):
     report: ErrorReport
 
     def __call__(self, x: PyTree[Array]) -> PyTree[Array]:
-        encoded = self.input_reduction.forward(ravel(x))
+        encoded = self.input_reduction.forward(self.domain.flatten(x))
         normalized = self.input_normalizer.forward(encoded)
         predicted = self.model(normalized)
         reduced_output = self.output_normalizer.inverse(predicted)

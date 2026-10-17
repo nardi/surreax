@@ -18,6 +18,7 @@ from typing import Protocol, runtime_checkable
 
 import equinox as eqx
 import jax.numpy as jnp
+import numpy as np
 from jaxtyping import Array, Float
 
 
@@ -84,6 +85,33 @@ def _projection(directions: Float[Array, "r n"], center: Float[Array, " n"]) -> 
         encode_bias=-directions @ center,
         decode_matrix=directions.T,
         decode_bias=center,
+    )
+
+
+def embed_continuous(reduction: LinearReduction, discrete: np.ndarray) -> LinearReduction:
+    """Extend a reduction of the continuous coordinates to pass discrete ones through.
+
+    `reduction` acts on the coordinates where `discrete` is false. The result acts
+    on every coordinate, with the reduced continuous coordinates first and the
+    discrete coordinates after them, unchanged. A reduction built from Jacobians
+    would otherwise drop an integer or categorical input, whose Jacobian is zero.
+    """
+    continuous_index = np.flatnonzero(~discrete)
+    discrete_index = np.flatnonzero(discrete)
+    rank = reduction.encode_matrix.shape[0]
+    size = discrete.shape[0]
+    encode = jnp.zeros((rank + discrete_index.size, size))
+    encode = encode.at[:rank, continuous_index].set(reduction.encode_matrix)
+    encode = encode.at[rank + np.arange(discrete_index.size), discrete_index].set(1.0)
+    decode = jnp.zeros((size, rank + discrete_index.size))
+    decode = decode.at[continuous_index, :rank].set(reduction.decode_matrix)
+    decode = decode.at[discrete_index, rank + np.arange(discrete_index.size)].set(1.0)
+    decode_bias = jnp.zeros(size).at[continuous_index].set(reduction.decode_bias)
+    return LinearReduction(
+        encode_matrix=encode,
+        encode_bias=jnp.concatenate([reduction.encode_bias, jnp.zeros(discrete_index.size)]),
+        decode_matrix=decode,
+        decode_bias=decode_bias,
     )
 
 

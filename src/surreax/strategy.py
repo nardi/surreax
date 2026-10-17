@@ -49,15 +49,24 @@ def function_kinds(
     per output. An affine output has a constant Jacobian, a piecewise linear one
     a varying Jacobian but no curvature, a polynomial one real curvature, and a
     discontinuous one a value jump that the Jacobian does not see.
+
+    Integer and categorical coordinates are held at the values of the first
+    sample, so their steps do not read as jumps, and the reading covers the
+    continuous coordinates only.
     """
+    discrete = domain.discrete_mask
+    continuous = np.flatnonzero(~discrete)
+    if continuous.size == 0:
+        raise ValueError("function_kinds needs at least one continuous coordinate")
     inputs = sampling.sample(domain, samples, seed=seed)
+    inputs = jnp.where(jnp.asarray(discrete), inputs[0], inputs)
 
     def flat_target(point: Float[Array, " d"]) -> Float[Array, " k"]:
         return ravel(target(domain.unravel(point)))
 
     values = jax.vmap(flat_target)(inputs)
-    jacobians = jax.vmap(jax.jacobian(flat_target))(inputs)
-    hessians = jax.vmap(jax.hessian(flat_target))(inputs)
+    jacobians = jax.vmap(jax.jacobian(flat_target))(inputs)[:, :, continuous]
+    hessians = jax.vmap(jax.hessian(flat_target))(inputs)[:, :, continuous][..., continuous]
 
     scale = jnp.mean(jnp.linalg.norm(jacobians, axis=2), axis=0) + 1e-12
     slope_variation = jnp.mean(
@@ -66,8 +75,8 @@ def function_kinds(
     curvature = jnp.mean(jnp.linalg.norm(hessians, axis=(2, 3)), axis=0)
 
     # A value jump the gradient misses shows up as a large adjacent secant along
-    # the first coordinate, since the samples are ordered along it.
-    order = jnp.argsort(inputs[:, 0])
+    # the first continuous coordinate, since the samples are ordered along it.
+    order = jnp.argsort(inputs[:, continuous[0]])
     gaps = jnp.linalg.norm(jnp.diff(inputs[order], axis=0), axis=1) + 1e-12
     secant = jnp.max(jnp.abs(jnp.diff(values[order], axis=0)) / gaps[:, None], axis=0)
 

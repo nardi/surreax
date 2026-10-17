@@ -21,7 +21,7 @@ import jax.numpy as jnp
 import numpy as np
 from jaxtyping import Array, Float, Int, PyTree
 
-from surreax.domain import Domain, box
+from surreax.domain import Box, Domain, box
 from surreax.fitted import FittedSurrogate
 from surreax.flatten import ravel
 from surreax.forms import DifferenceOfMaxAffineForm, LinearForm, MaxAffineForm, NetworkForm
@@ -92,10 +92,14 @@ def fit_separable(
     `form` is one form for every block, or a sequence of forms, one per block in
     sorted-label order, so a linear block can take a closed-form fit and a
     nonlinear one a richer form. Leaving it out picks a form per block from that
-    block's function kind.
+    block's function kind. The blocks are fitted over sub-boxes of a flat input,
+    so the domain must be a `Box`.
     """
     from surreax.api import fit
     from surreax.strategy import recommend_block_forms
+
+    if not isinstance(domain, Box):
+        raise TypeError("fit_separable needs a Box domain")
 
     structure = analyze(target, domain, samples=samples, tolerance=tolerance, seed=seed)
     input_block = np.asarray(structure.input_block)

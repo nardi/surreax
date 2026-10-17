@@ -7,9 +7,11 @@ result is the worst-case error for the report, and the climbed points are where
 adaptive sampling should add samples.
 
 The box constraint enters by a reparameterization: the optimizer works in an
-unbounded coordinate that maps into the box through a sigmoid, so there is no
-projection step. The search reuses the optimistix minimization backend, run on
-the negative error.
+unbounded coordinate that maps into the box through a sigmoid, so the continuous
+coordinates need no projection step. Integer and categorical coordinates stay
+fixed at a valid value during each climb, and the result is projected onto the
+domain, so the reported point is one the target could be called with. The search
+reuses the optimistix minimization backend, run on the negative error.
 """
 
 from collections.abc import Callable
@@ -65,9 +67,20 @@ def _search(
 
     solver = optx.OptaxMinimiser(optax.adam(learning_rate), rtol=1e-6, atol=1e-6)
 
+    # Discrete coordinates stay at the projected start of each climb, since the
+    # target has no useful gradient in them and a step between categories leaves
+    # the domain. Only the continuous coordinates move.
+    discrete = jnp.asarray(domain.discrete_mask)
+
     def climb(start):
-        found = optx.minimise(negative_error, solver, start, max_steps=steps, throw=False)
-        point = point_of(found.value)
+        fixed = domain.project(point_of(start))
+
+        def negative_error_held(unbounded, args):
+            held = unbounded_of(jnp.where(discrete, fixed, point_of(unbounded)))
+            return negative_error(held, args)
+
+        found = optx.minimise(negative_error_held, solver, start, max_steps=steps, throw=False)
+        point = domain.project(jnp.where(discrete, fixed, point_of(found.value)))
         return jnp.sqrt(squared_error(point)), point
 
     seed_errors = jax.vmap(squared_error)(seed_points)

@@ -57,12 +57,14 @@ def fit_network(
     key: PRNGKeyArray,
     jacobians: Float[Array, "n k d"] | None = None,
     derivative_weight: float = 0.0,
+    derivative_columns: tuple[int, ...] | None = None,
     initial: "Network | None" = None,
 ) -> Network:
     """Fit a feedforward network by minimizing the mean squared error.
 
     A positive `derivative_weight` with `jacobians` adds a Jacobian term, so the
-    network matches target derivatives as well as values. An `initial` network
+    network matches target derivatives as well as values, limited to the input
+    coordinates in `derivative_columns` when it is given. An `initial` network
     seeds the optimizer, so a refit continues from a previous fit.
     """
     if initial is None:
@@ -86,7 +88,10 @@ def fit_network(
         if jacobians is None:
             return residual
         model_jacobians = jax.vmap(jax.jacobian(model))(inputs)
-        return residual + derivative_weight * jnp.mean((model_jacobians - jacobians) ** 2)
+        mismatch = model_jacobians - jacobians
+        if derivative_columns is not None:
+            mismatch = mismatch[:, :, jnp.asarray(derivative_columns, dtype=int)]
+        return residual + derivative_weight * jnp.mean(mismatch**2)
 
     solver = optx.OptaxMinimiser(optax.adam(form.learning_rate), rtol=1e-8, atol=1e-8)
     fitted = optx.minimise(loss, solver, params, max_steps=form.steps, throw=False)

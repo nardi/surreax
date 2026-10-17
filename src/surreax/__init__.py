@@ -13,7 +13,22 @@ from surreax.autoencoder import (
     LatentGuess,
 )
 from surreax.composite import CompositeSurrogate, fit_separable
-from surreax.domain import Box, Domain, box, box_from_data
+from surreax.domain import (
+    Box,
+    Categorical,
+    Domain,
+    Integer,
+    LogRange,
+    Normal,
+    Product,
+    box,
+    box_from_data,
+    categorical,
+    integer,
+    log_range,
+    normal,
+    product,
+)
 from surreax.export import DifferenceExport, GridExport, MaxAffineExport, export
 from surreax.fitted import FittedSurrogate
 from surreax.forms import (
@@ -57,6 +72,7 @@ from surreax.implicit import (
 )
 from surreax.reduction import active_subspace_inputs, pca_inputs, pca_outputs
 from surreax.report import ErrorReport
+from surreax.sampling import Sampler
 from surreax.sparse_solve import LinearSolver, residual_pattern
 from surreax.stencil import StencilResidual
 from surreax.strategy import (
@@ -73,6 +89,7 @@ __all__ = [
     "AutoencoderSolve",
     "AutoencoderSolver",
     "Box",
+    "Categorical",
     "ChebyshevPolynomial",
     "CompositeSurrogate",
     "DecodedSurrogate",
@@ -88,22 +105,27 @@ __all__ = [
     "GridExport",
     "HyperReducedSolver",
     "ImplicitSurrogate",
+    "Integer",
     "InverseMap",
     "LatentGuess",
     "LatentReport",
     "LinearDecoder",
     "LinearForm",
     "LinearSolver",
+    "LogRange",
     "MaxAffine",
     "MaxAffineExport",
     "MaxAffineForm",
     "Network",
     "NetworkForm",
+    "Normal",
     "Objective",
+    "Product",
     "ReducedSolve",
     "ReducedSolver",
     "RefinedSurrogate",
     "Residual",
+    "Sampler",
     "StencilResidual",
     "Structure",
     "Target",
@@ -112,6 +134,7 @@ __all__ = [
     "autoencoder_solver",
     "box",
     "box_from_data",
+    "categorical",
     "export",
     "fit",
     "fit_adaptive",
@@ -120,9 +143,13 @@ __all__ = [
     "fit_separable",
     "function_kinds",
     "hyper_reduce",
+    "integer",
     "linear_energy",
+    "log_range",
+    "normal",
     "pca_inputs",
     "pca_outputs",
+    "product",
     "prune_inputs",
     "recommend_block_forms",
     "recommend_form",

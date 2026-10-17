@@ -81,6 +81,8 @@ def fit_separable(
     holdout: float = 0.2,
     ridge: float = 1e-8,
     tolerance: float = 1e-6,
+    worst_case_starts: int = 8,
+    worst_case_steps: int = 200,
     seed: int = 0,
 ) -> CompositeSurrogate:
     """Fit a target as independent per-block surrogates and assemble them.
@@ -88,6 +90,12 @@ def fit_separable(
     Reads the block decomposition from the structural analysis, fits each block
     on its own inputs over its sub-box, and reports the worst per-block error and
     the bound on the error from the coupling dropped between blocks.
+
+    Each block searches its own sub-box for its worst case. The blocks read
+    disjoint inputs, so their worst cases can all occur at one input, and the
+    worst case of the whole is the root sum of squares of the block worst cases,
+    at the input that joins the block points. `worst_case_starts` of zero skips
+    the search.
 
     `form` is one form for every block, or a sequence of forms, one per block in
     sorted-label order, so a linear block can take a closed-form fit and a
@@ -123,10 +131,12 @@ def fit_separable(
     value_means: list[Float[Array, ""]] = []
     value_maxes: list[Float[Array, ""]] = []
     structure_cost = 0
+    worst_cases: list[Float[Array, ""]] = []
     output_dimension = output_block.shape[0]
     # Ignored inputs are anchored at the box midpoint, which the block's outputs
     # do not depend on, so their value does not matter.
     midpoint = jnp.asarray((lower_np + upper_np) / 2)
+    worst_point = midpoint
 
     for index, label in enumerate(labels):
         inputs = tuple(int(j) for j in np.flatnonzero(input_block == label))
@@ -146,10 +156,13 @@ def fit_separable(
             samples=samples,
             holdout=holdout,
             ridge=ridge,
-            worst_case_starts=0,
+            worst_case_starts=worst_case_starts,
+            worst_case_steps=worst_case_steps,
             seed=seed,
         )
         blocks.append(fitted)
+        worst_cases.append(fitted.report.worst_case)
+        worst_point = worst_point.at[chosen].set(fitted.report.worst_case_point)
         input_indices.append(inputs)
         output_indices.append(outputs)
         value_means.append(fitted.report.value_mean)
@@ -166,8 +179,8 @@ def fit_separable(
         derivative_max=jnp.asarray(0.0),
         projection_mean=coupling_mean,
         projection_max=coupling_max,
-        worst_case=jnp.asarray(0.0),
-        worst_case_point=jnp.zeros(input_block.shape[0]),
+        worst_case=jnp.sqrt(jnp.sum(jnp.stack(worst_cases) ** 2)),
+        worst_case_point=worst_point,
         structure_cost=structure_cost,
     )
     return CompositeSurrogate(

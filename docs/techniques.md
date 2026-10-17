@@ -214,6 +214,11 @@ one fit over everything. It reads the blocks from the structural analysis. Pass
 one form for every block, or a sequence of forms in sorted-block order, so a
 linear block can take a closed-form fit and a nonlinear one a richer form.
 
+Each block searches its own inputs for its worst-case error. The blocks read
+separate inputs, so their worst cases can all happen at once, and the report's
+worst case is the root sum of squares of the block worst cases, at the input
+that joins the block points.
+
 <!-- name: test_techniques_separable -->
 ```python
 import jax.numpy as jnp
@@ -232,6 +237,8 @@ point = jnp.array([0.4, 0.5])
 assert jnp.allclose(surrogate(point), target(point), atol=1e-2)
 # The report bounds the error from any coupling dropped between blocks.
 assert float(surrogate.report.projection_max) < 1e-5
+# The per-block search finds a larger error than the held-out sample.
+assert surrogate.report.value_max <= surrogate.report.worst_case < 5e-2
 ```
 
 ## Automatic strategy selection

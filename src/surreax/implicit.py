@@ -35,7 +35,7 @@ from surreax.autoencoder import (
     DecodedSurrogate,
     train_autoencoder,
 )
-from surreax.domain import Box, Domain, box_from_data
+from surreax.domain import Box, Domain, domain_from_data
 from surreax.fitted import FittedSurrogate
 from surreax.fitting import LinearModel, fit_linear, fit_linear_sobolev
 from surreax.flatten import ravel_example
@@ -65,6 +65,7 @@ def _value_report(
     value_max: Float[Array, ""],
     dimension: int,
     structure_cost: int,
+    coverage_max: Float[Array, ""] | None = None,
 ) -> ErrorReport:
     zero = jnp.asarray(0.0)
     return ErrorReport(
@@ -77,6 +78,7 @@ def _value_report(
         worst_case=zero,
         worst_case_point=jnp.zeros(dimension),
         structure_cost=structure_cost,
+        coverage_max=zero if coverage_max is None else coverage_max,
     )
 
 
@@ -146,13 +148,17 @@ def fit_data(
         output_normalizer=output_normalizer,
         output_reduction=output_reduction,
         output_unravel=output_unravel,
-        domain=box_from_data(inputs),
+        domain=domain_from_data(train_inputs),
         report=_zero_report(inputs.shape[1]),
     )
     predicted = jax.vmap(surrogate)(holdout_inputs)
     residual = jnp.linalg.norm(predicted - holdout_outputs, axis=1)
     report = _value_report(
-        jnp.mean(residual), jnp.max(residual), inputs.shape[1], model.weights.shape[1]
+        jnp.mean(residual),
+        jnp.max(residual),
+        inputs.shape[1],
+        model.weights.shape[1],
+        jnp.max(jax.vmap(surrogate.coverage)(holdout_inputs)),
     )
     return eqx.tree_at(lambda s: s.report, surrogate, report)
 
@@ -821,7 +827,7 @@ def _distill_latent_map(
         output_normalizer=latent_normalizer,
         output_reduction=projection,
         output_unravel=output_unravel,
-        domain=box_from_data(inputs),
+        domain=domain_from_data(train_inputs),
         report=_zero_report(inputs.shape[1]),
     )
     # Score the distilled map against the reduced solver in the latent space.

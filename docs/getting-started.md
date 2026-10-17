@@ -34,7 +34,28 @@ domain = sx.box([5.0, 0.2], [20.0, 1.3])
 ```
 
 If you already have a dataset of inputs, `sx.box_from_data(points)` infers the
-tightest box that contains them.
+tightest box that contains them. A box around clustered or correlated data also
+contains empty regions the data never reached, so `sx.domain_from_data(points)`
+keeps a model of where the data lies as well. A surrogate fitted over it reads
+`surrogate.coverage(x)`, which is at most one near the data and grows away from
+it, so you can flag a prediction that is an extrapolation. The report's
+`coverage_max` gives the largest coverage over the held-out points.
+
+<!-- name: test_start_coverage -->
+```python
+import jax
+import jax.numpy as jnp
+import surreax as sx
+
+along = jax.random.uniform(jax.random.key(0), (200,))
+points = jnp.stack([along, along + 0.01 * jax.random.normal(jax.random.key(1), (200,))], axis=1)
+outputs = jnp.sum(points**2, axis=1, keepdims=True)
+surrogate = sx.fit_data(points, outputs, sx.ChebyshevPolynomial(degree=2))
+
+# A point on the data's diagonal is covered, a corner of its bounding box is not.
+assert float(surrogate.coverage(jnp.array([0.5, 0.5]))) <= 1.0
+assert float(surrogate.coverage(jnp.array([0.95, 0.05]))) > 1.0
+```
 
 ### Other input kinds
 

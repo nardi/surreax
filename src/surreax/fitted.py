@@ -7,9 +7,9 @@ the error report alongside its parameters.
 """
 
 import equinox as eqx
-from jaxtyping import Array, PyTree
+from jaxtyping import Array, Float, PyTree
 
-from surreax.domain import Domain
+from surreax.domain import Domain, coverage
 from surreax.fitting import LinearModel
 from surreax.flatten import Unraveler
 from surreax.forms.difference_max_affine import DifferenceOfMaxAffine
@@ -43,3 +43,11 @@ class FittedSurrogate(eqx.Module):
         reduced_output = self.output_normalizer.inverse(predicted)
         flat_output = self.output_reduction.inverse(reduced_output)
         return self.output_unravel(flat_output)
+
+    def coverage(self, x: PyTree[Array]) -> Float[Array, ""]:
+        """How far an input lies from where the surrogate was fitted, see `domain.coverage`.
+
+        At most one means the input is covered. Above one, the prediction there
+        is an extrapolation.
+        """
+        return coverage(self.domain, self.domain.flatten(x))

@@ -15,7 +15,7 @@ import numpy as np
 from jaxtyping import Array, Float, PyTree
 
 from surreax import normalize, reduction, sampling, strategy
-from surreax.domain import Domain
+from surreax.domain import Domain, coverage
 from surreax.error_search import high_error_points, worst_case
 from surreax.fitted import FittedSurrogate
 from surreax.fitting import fit_linear, fit_linear_sobolev, fit_linear_sparse
@@ -114,6 +114,7 @@ def _error_report(
         return reduction.inverse(reduction.forward(output))
 
     projection_residual = jnp.linalg.norm(actual - jax.vmap(reconstruct)(actual), axis=1)
+    covered = jax.vmap(lambda point: coverage(surrogate.domain, point))(inputs)
     return ErrorReport(
         value_mean=jnp.mean(value_residual),
         value_max=jnp.max(value_residual),
@@ -124,6 +125,7 @@ def _error_report(
         worst_case=worst_case_value,
         worst_case_point=worst_case_point,
         structure_cost=structure_cost,
+        coverage_max=jnp.max(covered),
     )
 
 

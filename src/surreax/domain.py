@@ -27,7 +27,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 from jax.scipy.special import ndtr, ndtri
-from jaxtyping import Array, Float, PyTree
+from jaxtyping import Array, Float, Int, PyTree
 
 from surreax.flatten import ravel, ravel_example
 
@@ -377,3 +377,122 @@ def categorical(
 def box_from_data(points: Float[Array, "n d"]) -> Box:
     """Infer the tightest box that contains a dataset of inputs."""
     return Box(lower=jnp.min(points, axis=0), upper=jnp.max(points, axis=0))
+
+
+class DataDomain(eqx.Module):
+    """A domain inferred from a dataset, with a model of where the data lies.
+
+    It samples and normalizes through the bounding box of the data, like
+    `box_from_data`. It also keeps the principal subspace of the data and the
+    data in whitened subspace coordinates, so `coverage` can tell a point near
+    the data from one in an empty part of the box.
+    """
+
+    box: Box
+    center: Float[Array, " d"]
+    basis: Float[Array, "r d"]
+    """Principal directions of the data, one per row."""
+
+    spread: Float[Array, " r"]
+    """Standard deviation of the data along each principal direction."""
+
+    whitened: Float[Array, "n r"]
+    """The data in principal coordinates, divided by `spread`."""
+
+    off_scale: Float[Array, ""]
+    """Largest distance of a data point from the principal subspace."""
+
+    within_scale: Float[Array, ""]
+    """Largest distance from a data point to its nearest neighbor, in whitened
+    coordinates."""
+
+    @property
+    def dimension(self) -> int:
+        return self.box.dimension
+
+    @property
+    def discrete_mask(self) -> np.ndarray:
+        return self.box.discrete_mask
+
+    def sample_unit(self, unit_points: Float[Array, "n d"]) -> Float[Array, "n d"]:
+        return self.box.sample_unit(unit_points)
+
+    def bounds(self) -> tuple[Float[Array, " d"], Float[Array, " d"]]:
+        return self.box.bounds()
+
+    def unravel(self, point: Float[Array, " d"]) -> PyTree[Array]:
+        return self.box.unravel(point)
+
+    def flatten(self, value: PyTree[Array]) -> Float[Array, " d"]:
+        return self.box.flatten(value)
+
+    def project(self, point: Float[Array, " d"]) -> Float[Array, " d"]:
+        return point
+
+    def coverage(self, point: Float[Array, " d"]) -> Float[Array, ""]:
+        """How far a flat point lies from the data, at most one when near it.
+
+        The larger of two distances. One is the distance off the principal
+        subspace over the largest such distance in the data. The other is the
+        whitened distance to the nearest data point within the subspace over the
+        largest nearest-neighbor spacing in the data, which catches a gap between
+        clusters that a box or a single ellipsoid would cover.
+        """
+        centered = point - self.center
+        coordinates = self.basis @ centered
+        off = jnp.linalg.norm(centered - self.basis.T @ coordinates) / self.off_scale
+        gaps = jnp.linalg.norm(self.whitened - coordinates / self.spread, axis=1)
+        return jnp.maximum(off, jnp.min(gaps) / self.within_scale)
+
+
+def domain_from_data(points: Float[Array, "n d"], *, variance: float = 0.99) -> DataDomain:
+    """Infer a `DataDomain` from a dataset of inputs.
+
+    Keeps the fewest principal directions that capture `variance` of the spread
+    of the data.
+    """
+    center = jnp.mean(points, axis=0)
+    centered = points - center
+    _, singular, directions = jnp.linalg.svd(centered, full_matrices=False)
+    energy = np.cumsum(np.asarray(singular) ** 2)
+    rank = int(np.searchsorted(energy, variance * energy[-1]) + 1)
+    basis = directions[:rank]
+    coordinates = centered @ basis.T
+    spread = jnp.std(coordinates, axis=0)
+    spread = jnp.where(spread > 0, spread, 1.0)
+    whitened = coordinates / spread
+    off = jnp.linalg.norm(centered - coordinates @ basis, axis=1)
+    # A dataset exactly on its subspace has no off-subspace spread, so the scale
+    # falls back to a small fraction of the overall spread.
+    off_scale = jnp.maximum(jnp.max(off), 1e-6 * jnp.max(jnp.abs(centered)))
+
+    def nearest_other(row: Int[Array, ""]) -> Float[Array, ""]:
+        distances = jnp.linalg.norm(whitened - whitened[row], axis=1)
+        return jnp.min(distances.at[row].set(jnp.inf))
+
+    # One row at a time, so a large dataset never forms the full distance matrix.
+    nearest = jax.lax.map(nearest_other, jnp.arange(points.shape[0]))
+    return DataDomain(
+        box=box_from_data(points),
+        center=center,
+        basis=basis,
+        spread=spread,
+        whitened=whitened,
+        off_scale=off_scale,
+        within_scale=jnp.max(nearest),
+    )
+
+
+def coverage(domain: Domain, point: Float[Array, " d"]) -> Float[Array, ""]:
+    """How far a flat point lies from where a domain says the inputs are.
+
+    At most one means covered. A `DataDomain` reads the distance from its data.
+    Any other domain reads zero inside its bounds, and one plus the largest
+    excess past a bound, as a fraction of that coordinate's width, outside them.
+    """
+    if isinstance(domain, DataDomain):
+        return domain.coverage(point)
+    lower, upper = domain.bounds()
+    width = jnp.where(upper > lower, upper - lower, 1.0)
+    excess = jnp.max(jnp.maximum(lower - point, point - upper) / width)
+    return jnp.where(excess > 0, 1.0 + excess, 0.0)

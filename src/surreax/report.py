@@ -8,10 +8,12 @@ apart because a surrogate can match values well and derivatives badly, and a
 downstream optimizer will consume the derivatives. These are measured on
 held-out points in flat output space. The worst-case error is found by ascending
 the error over the whole domain with gradients, so it catches a bad region that
-the held-out sample misses.
+the held-out sample misses. The coverage reads whether the held-out points lie
+where the domain's data is.
 """
 
 import equinox as eqx
+import jax.numpy as jnp
 from jaxtyping import Array, Float
 
 
@@ -35,4 +37,12 @@ class ErrorReport(eqx.Module):
 
     A larger structure cost buys accuracy but makes the surrogate more expensive
     to reason about later.
+    """
+
+    coverage_max: Float[Array, ""] = eqx.field(default_factory=lambda: jnp.asarray(0.0))
+    """Largest coverage over the held-out points, see `domain.coverage`.
+
+    At most one means every held-out point lies where the domain says the data
+    is. Above one, some held-out points lie away from it, such as a cluster the
+    training split missed, or samples drawn in an empty part of the box.
     """

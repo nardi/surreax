@@ -21,6 +21,8 @@ def test_an_empty_corner_of_the_box_is_not_covered() -> None:
     # The corner lies inside the bounding box but far from the data.
     assert float(domain.coverage(jnp.array([0.95, 0.05]))) > 1.0
     assert float(sx.coverage(sx.box_from_data(_diagonal()), jnp.array([0.95, 0.05]))) == 0.0
+    # The inferred domain is continuous, so projecting leaves a point alone.
+    assert jnp.array_equal(domain.project(jnp.array([0.95, 0.05])), jnp.array([0.95, 0.05]))
 
 
 def test_the_gap_between_two_clusters_is_not_covered() -> None:

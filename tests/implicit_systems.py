@@ -16,6 +16,7 @@ test can run a system small for correctness and large for scaling.
 from collections.abc import Sequence
 from typing import NamedTuple
 
+import jax
 import jax.numpy as jnp
 import numpy as np
 from jaxtyping import Array, Float, Int
@@ -96,6 +97,51 @@ def radiating_rod(points: int, heaters: int = 4) -> ImplicitSystem:
         sx.StencilResidual(stencil=stencil, entry=entry),
         sx.box([0.0] * heaters, [1.0] * heaters),
         sx.box([-2.0] * points, [2.0] * points),
+    )
+
+
+THERMOSTAT_SETPOINT = 0.5
+"""Temperature at which the thermostat heaters of the thermostat rod are half on."""
+
+THERMOSTAT_WIDTH = 0.2
+"""Temperature span over which a thermostat heater switches from off to fully on."""
+
+THERMOSTAT_POWER = 1.0
+"""Heat per point of a fully on thermostat heater."""
+
+
+def thermostat_rod(points: int) -> ImplicitSystem:
+    """A rod with a thermostat-controlled heater at every point, in a varying ambient.
+
+    `g_i = -(y_{i-1} - 2 y_i + y_{i+1}) + 0.5 (y_i - a) - P s((T - y_i) / w) - q phi_i`,
+    with ambient temperature `a = x_0`, a load `q = x_1` on a patch `phi`, and
+    `s` the logistic function. The ends sit at the ambient temperature. A warm
+    ambient leaves the heaters off and the rod follows it. As the ambient cools
+    the heaters ramp up and hold the rod near the setpoint `T`, until they
+    saturate and the rod follows the ambient again, about `2 P` warmer. The
+    temperature is a function of the ambient with slope 1, then about 0, then 1,
+    so it is concave at one kink and convex at the other. The Jacobian is
+    positive definite, since the heaters push back against a temperature change,
+    so the solution is unique.
+    """
+    stencil, inside = _chain(points, (-1, 0, 1))
+    position = (jnp.arange(points) + 1) / (points + 1)
+    patch = jnp.exp(-(((position - 0.7) / 0.1) ** 2))
+
+    def entry(
+        x: Float[Array, " k"], i: Int[Array, ""], near: Float[Array, " 3"]
+    ) -> Float[Array, ""]:
+        ambient, load = x
+        # A neighbor past either end is at the ambient temperature.
+        left, here, right = jnp.where(inside[i] > 0, near, ambient)
+        conduction = -(left - 2.0 * here + right) + 0.5 * (here - ambient)
+        heater = THERMOSTAT_POWER * jax.nn.sigmoid((THERMOSTAT_SETPOINT - here) / THERMOSTAT_WIDTH)
+        return conduction - heater - load * patch[i]
+
+    return ImplicitSystem(
+        sx.StencilResidual(stencil=stencil, entry=entry),
+        sx.box([-2.5, 0.0], [2.0, 1.0]),
+        sx.box([-3.0] * points, [3.0] * points),
     )
 
 

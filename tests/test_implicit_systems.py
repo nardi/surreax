@@ -34,6 +34,7 @@ _SOLVABLE: dict[str, Callable[[], systems.ImplicitSystem]] = {
     "diode_network": lambda: systems.diode_network(8, 8),
     "radiating_plate": lambda: systems.radiating_plate(8),
     "radiating_block": lambda: systems.radiating_block(5),
+    "thermostat_rod": lambda: systems.thermostat_rod(48),
 }
 
 
@@ -123,3 +124,20 @@ def test_latch_ring_holds_two_states() -> None:
     assert float(jnp.linalg.norm(ring.residual(x, stored_zero))) < 1e-5
     assert float(jnp.linalg.norm(ring.residual(x, stored_one))) < 1e-5
     assert float(jnp.linalg.norm(stored_zero - stored_one)) > 1.0
+
+
+def test_thermostat_rod_response_is_neither_convex_nor_concave() -> None:
+    system = systems.thermostat_rod(48)
+    ambient = jnp.linspace(-2.5, 2.0, 91)
+    inputs = jnp.stack([ambient, jnp.full_like(ambient, 0.3)], axis=1)
+    starts = jnp.zeros((91, 48))
+    states = _solve_independently(system.residual, inputs, starts, 14)
+    slope = jnp.diff(states[:, 24]) / jnp.diff(ambient)
+    curvature = jnp.diff(slope)
+    # The saturated heaters leave the rod following the ambient on the cold side and
+    # the off heaters on the warm side, while the regulating heaters hold it between.
+    assert float(slope[:5].mean()) > 0.8
+    assert float(slope[-5:].mean()) > 0.9
+    assert float(slope.min()) < 0.35
+    assert float(curvature.max()) > 0.025
+    assert float(curvature.min()) < -0.025

@@ -75,19 +75,33 @@ def _alternating(
     """One run of alternating minimization from a random assignment.
 
     Every refit is pulled toward the previous planes, starting from the plane that
-    fits all the samples, see `_least_squares_pieces`.
+    fits all the samples, see `_least_squares_pieces`. The alternation is not a
+    descent method, since refitting each piece to its own region can raise the
+    error of the maximum, so the run returns the best planes it passed through.
+    The plane that fits all the samples is the first candidate, so the result is
+    never worse than an affine fit.
     """
     initial = jax.random.randint(key, (augmented.shape[0],), 0, pieces)
     everything = jnp.ones((augmented.shape[0],), dtype=jnp.int32)
     prior = jnp.tile(_least_squares_pieces(augmented, target, everything, 1, None), (pieces, 1))
+    prior_error = _mean_squared_error(prior, augmented, target)
 
     def step(_, state):
-        assignment, previous = state
+        assignment, previous, best, best_error = state
         planes = _least_squares_pieces(augmented, target, assignment, pieces, previous)
-        return jnp.argmax(augmented @ planes.T, axis=1), planes
+        error = _mean_squared_error(planes, augmented, target)
+        better = error < best_error
+        return (
+            jnp.argmax(augmented @ planes.T, axis=1),
+            planes,
+            jnp.where(better, planes, best),
+            jnp.where(better, error, best_error),
+        )
 
-    assignment, previous = jax.lax.fori_loop(0, iterations, step, (initial, prior))
-    return _least_squares_pieces(augmented, target, assignment, pieces, previous)
+    _, _, best, _ = jax.lax.fori_loop(
+        0, iterations + 1, step, (initial, prior, prior, prior_error)
+    )
+    return best
 
 
 def _least_squares_pieces(

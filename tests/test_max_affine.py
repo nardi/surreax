@@ -2,9 +2,15 @@
 
 import jax
 import jax.numpy as jnp
+import pytest
 
 import surreax as sx
-from surreax.forms.max_affine import MaxAffine, fit_max_affine
+from surreax.forms.max_affine import (
+    MaxAffine,
+    _augment,
+    _least_squares_pieces,
+    fit_max_affine,
+)
 
 
 def _convex_target(x: jax.Array) -> jax.Array:
@@ -60,3 +66,34 @@ def test_max_affine_fit_is_deterministic_for_a_key() -> None:
     first = fit_max_affine(form, inputs, targets, key=jax.random.key(7))
     second = fit_max_affine(form, inputs, targets, key=jax.random.key(7))
     assert jnp.allclose(first.slopes, second.slopes)
+
+
+@pytest.mark.parametrize("pieces", [4, 8])
+@pytest.mark.parametrize("outputs", [1, 4])
+def test_more_pieces_than_an_affine_target_needs_do_not_hurt(pieces: int, outputs: int) -> None:
+    # Every piece of an exact fit is the same plane, so the assignment by the
+    # maximum is a near tie that empties and shrinks pieces.
+    matrix = jax.random.normal(jax.random.key(0), (outputs, 4))
+    domain = sx.box([-1.0] * 4, [1.0] * 4)
+    surrogate = sx.fit(
+        lambda x: matrix @ x,
+        domain,
+        sx.MaxAffineForm(pieces=pieces, restarts=4, iterations=20),
+        samples=256,
+        worst_case_starts=0,
+    )
+    assert float(surrogate.report.value_max) < 1e-2
+
+
+def test_a_piece_without_samples_keeps_its_previous_plane() -> None:
+    inputs = jax.random.uniform(jax.random.key(1), (32, 2), minval=-1.0, maxval=1.0)
+    augmented = _augment(inputs)
+    target = inputs @ jnp.array([1.0, -2.0]) + 0.5
+    prior = jnp.array([[0.5, 1.0, -2.0], [3.0, 4.0, 5.0], [-1.0, 0.0, 2.0]])
+    assignment = jnp.zeros(32, dtype=jnp.int32)
+    planes = _least_squares_pieces(augmented, target, assignment, 3, prior)
+    assert jnp.allclose(planes[0], prior[0], atol=1e-3)
+    assert jnp.allclose(planes[1:], prior[1:], atol=1e-3)
+    # Without a prior an empty piece falls to the zero plane.
+    unanchored = _least_squares_pieces(augmented, target, assignment, 3, None)
+    assert jnp.allclose(unanchored[1:], 0.0, atol=1e-3)

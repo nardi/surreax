@@ -20,6 +20,7 @@ is fitted coordinate by coordinate.
 import equinox as eqx
 import jax
 import jax.numpy as jnp
+import numpy as np
 import optax
 import optimistix as optx
 from jaxtyping import Array, Float, Int, PRNGKeyArray
@@ -71,15 +72,22 @@ def _alternating(
     iterations: int,
     key: PRNGKeyArray,
 ) -> Float[Array, "m p"]:
-    """One run of alternating minimization from a random assignment."""
+    """One run of alternating minimization from a random assignment.
+
+    Every refit is pulled toward the previous planes, starting from the plane that
+    fits all the samples, see `_least_squares_pieces`.
+    """
     initial = jax.random.randint(key, (augmented.shape[0],), 0, pieces)
+    everything = jnp.ones((augmented.shape[0],), dtype=jnp.int32)
+    prior = jnp.tile(_least_squares_pieces(augmented, target, everything, 1, None), (pieces, 1))
 
-    def step(_, assignment):
-        planes = _least_squares_pieces(augmented, target, assignment, pieces)
-        return jnp.argmax(augmented @ planes.T, axis=1)
+    def step(_, state):
+        assignment, previous = state
+        planes = _least_squares_pieces(augmented, target, assignment, pieces, previous)
+        return jnp.argmax(augmented @ planes.T, axis=1), planes
 
-    assignment = jax.lax.fori_loop(0, iterations, step, initial)
-    return _least_squares_pieces(augmented, target, assignment, pieces)
+    assignment, previous = jax.lax.fori_loop(0, iterations, step, (initial, prior))
+    return _least_squares_pieces(augmented, target, assignment, pieces, previous)
 
 
 def _least_squares_pieces(
@@ -87,16 +95,29 @@ def _least_squares_pieces(
     target: Float[Array, " n"],
     assignment: Int[Array, " n"],
     pieces: int,
+    prior: Float[Array, "m p"] | None,
 ) -> Float[Array, "m p"]:
-    """Refit every piece by least squares on the samples assigned to it."""
+    """Refit every piece by least squares on the samples assigned to it.
 
-    def fit_piece(index):
+    A small ridge pulls each piece toward its plane in `prior`, or toward zero
+    without one. A piece that lost all its samples then keeps its plane, and one
+    left with fewer samples than parameters keeps the prior in the directions
+    those samples do not fix. Pulling toward zero instead leaves an empty piece at
+    the zero plane, which clips the maximum at zero, and shrinks a small piece
+    toward zero, so the fit gets worse as pieces outnumber what the target needs.
+    """
+    parameters = augmented.shape[1]
+    if prior is None:
+        prior = jnp.zeros((pieces, parameters), dtype=augmented.dtype)
+
+    def fit_piece(index, plane):
         weights = (assignment == index).astype(augmented.dtype)
         weighted = augmented * weights[:, None]
-        gram = augmented.T @ weighted + 1e-6 * jnp.eye(augmented.shape[1], dtype=augmented.dtype)
-        return jnp.linalg.solve(gram, weighted.T @ target)
+        ridge = float(np.sqrt(np.finfo(augmented.dtype).eps))
+        gram = augmented.T @ weighted + ridge * jnp.eye(parameters, dtype=augmented.dtype)
+        return jnp.linalg.solve(gram, weighted.T @ target + ridge * plane)
 
-    return jax.vmap(fit_piece)(jnp.arange(pieces))
+    return jax.vmap(fit_piece)(jnp.arange(pieces), prior)
 
 
 def _gradient(

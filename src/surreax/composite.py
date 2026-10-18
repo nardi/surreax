@@ -24,12 +24,11 @@ from jaxtyping import Array, Float, Int, PyTree
 from surreax.domain import Box, Domain, box
 from surreax.fitted import FittedSurrogate
 from surreax.flatten import ravel
-from surreax.forms import DifferenceOfMaxAffineForm, LinearForm, MaxAffineForm, NetworkForm
+from surreax.forms import Form
 from surreax.report import ErrorReport
 from surreax.structure import analyze
 
 Target = Callable[[PyTree[Array]], PyTree[Array]]
-Form = LinearForm | MaxAffineForm | DifferenceOfMaxAffineForm | NetworkForm
 
 
 class CompositeSurrogate(eqx.Module):

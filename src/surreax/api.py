@@ -21,6 +21,7 @@ from surreax.error_search import high_error_points, worst_case
 from surreax.fitted import FittedSurrogate
 from surreax.fitting import fit_linear, fit_linear_sobolev, fit_linear_sparse
 from surreax.flatten import Unraveler, ravel, ravel_example
+from surreax.forms import Form
 from surreax.forms.difference_max_affine import (
     DifferenceOfMaxAffine,
     DifferenceOfMaxAffineForm,
@@ -29,6 +30,14 @@ from surreax.forms.difference_max_affine import (
 from surreax.forms.max_affine import MaxAffine, MaxAffineForm, fit_max_affine
 from surreax.forms.network import Network, NetworkForm, fit_network, parameter_count
 from surreax.forms.protocol import LinearForm
+from surreax.forms.relu_network import (
+    ConvexNetwork,
+    ConvexNetworkForm,
+    ReluNetwork,
+    ReluNetworkForm,
+    fit_convex_network,
+    fit_relu_network,
+)
 from surreax.normalize import Normalizer
 from surreax.reduction import LinearReduction
 from surreax.report import ErrorReport
@@ -133,7 +142,7 @@ def _error_report(
 def fit(
     target: Target,
     domain: Domain,
-    form: LinearForm | MaxAffineForm | DifferenceOfMaxAffineForm | NetworkForm | None = None,
+    form: Form | None = None,
     *,
     samples: int = 512,
     holdout: float = 0.2,
@@ -299,6 +308,30 @@ def fit(
                 initial=previous if isinstance(previous, Network) else None,
             )
             structure_cost = parameter_count(model)
+        case ConvexNetworkForm():
+            model = fit_convex_network(
+                form,
+                normalized_inputs,
+                normalized_outputs,
+                key=jax.random.key(seed),
+                jacobians=target_jacobians,
+                derivative_weight=derivative_weight,
+                derivative_columns=derivative_columns,
+                initial=previous if isinstance(previous, ConvexNetwork) else None,
+            )
+            structure_cost = parameter_count(model)
+        case ReluNetworkForm():
+            model = fit_relu_network(
+                form,
+                normalized_inputs,
+                normalized_outputs,
+                key=jax.random.key(seed),
+                jacobians=target_jacobians,
+                derivative_weight=derivative_weight,
+                derivative_columns=derivative_columns,
+                initial=previous if isinstance(previous, ReluNetwork) else None,
+            )
+            structure_cost = parameter_count(model)
         case _:
             raise TypeError(f"unsupported form: {type(form).__name__}")
 
@@ -352,7 +385,7 @@ def fit(
 def fit_adaptive(
     target: Target,
     domain: Domain,
-    form: LinearForm | MaxAffineForm | DifferenceOfMaxAffineForm | NetworkForm,
+    form: Form,
     *,
     initial_samples: int = 256,
     points_per_round: int = 32,
@@ -424,7 +457,7 @@ def fit_constrained(
     target: Target,
     domain: Domain,
     constraint: Constraint,
-    form: LinearForm | MaxAffineForm | DifferenceOfMaxAffineForm | NetworkForm | None = None,
+    form: Form | None = None,
     *,
     samples: int = 512,
     holdout: float = 0.2,

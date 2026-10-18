@@ -34,19 +34,31 @@ from surreax.domain import (
     normal,
     product,
 )
-from surreax.export import DifferenceExport, GridExport, MaxAffineExport, export
+from surreax.export import (
+    ConvexNetworkExport,
+    DifferenceExport,
+    GridExport,
+    MaxAffineExport,
+    ReluNetworkExport,
+    export,
+)
 from surreax.fitted import FittedSurrogate
 from surreax.forms import (
     Affine,
     ChebyshevPolynomial,
+    ConvexNetwork,
+    ConvexNetworkForm,
     DifferenceOfMaxAffine,
     DifferenceOfMaxAffineForm,
+    Form,
     Grid,
     LinearForm,
     MaxAffine,
     MaxAffineForm,
     Network,
     NetworkForm,
+    ReluNetwork,
+    ReluNetworkForm,
 )
 from surreax.hyperreduction import (
     HyperReducedSolver,
@@ -103,6 +115,9 @@ __all__ = [
     "CompletedSurrogate",
     "CompositeSurrogate",
     "Constraint",
+    "ConvexNetwork",
+    "ConvexNetworkExport",
+    "ConvexNetworkForm",
     "DataDomain",
     "DecodedSurrogate",
     "DifferenceExport",
@@ -114,6 +129,7 @@ __all__ = [
     "FitSettings",
     "FittedSurrogate",
     "FoldReport",
+    "Form",
     "Grid",
     "GridExport",
     "HyperReducedSolver",
@@ -137,6 +153,9 @@ __all__ = [
     "ReducedSolve",
     "ReducedSolver",
     "RefinedSurrogate",
+    "ReluNetwork",
+    "ReluNetworkExport",
+    "ReluNetworkForm",
     "Residual",
     "Sampler",
     "StencilResidual",

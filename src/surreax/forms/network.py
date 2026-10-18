@@ -13,6 +13,7 @@ the gradient fit rather than a closed-form solve.
 """
 
 from collections.abc import Callable
+from typing import TypeVar
 
 import equinox as eqx
 import jax
@@ -20,6 +21,9 @@ import jax.numpy as jnp
 import optax
 import optimistix as optx
 from jaxtyping import Array, Float, PRNGKeyArray
+
+_ModelT = TypeVar("_ModelT", bound=eqx.Module)
+"""A trainable network model."""
 
 
 class Network(eqx.Module):
@@ -43,10 +47,49 @@ class NetworkForm(eqx.Module):
     learning_rate: float = eqx.field(static=True, default=0.01)
 
 
-def parameter_count(model: Network) -> int:
-    """Number of scalar parameters in the network."""
+def parameter_count(model: eqx.Module) -> int:
+    """Number of scalar parameters in a network model."""
     leaves = jax.tree.leaves(eqx.filter(model, eqx.is_inexact_array))
     return int(sum(leaf.size for leaf in leaves))
+
+
+def minimize_squared_error(
+    start: _ModelT,
+    inputs: Float[Array, "n d"],
+    targets: Float[Array, "n k"],
+    *,
+    learning_rate: float,
+    steps: int,
+    jacobians: Float[Array, "n k d"] | None = None,
+    derivative_weight: float = 0.0,
+    derivative_columns: tuple[int, ...] | None = None,
+) -> tuple[_ModelT, Float[Array, ""]]:
+    """Train a model from `start` by Adam on the mean squared error.
+
+    A positive `derivative_weight` with `jacobians` adds a Jacobian term, limited
+    to the input coordinates in `derivative_columns` when it is given. Returns the
+    trained model and its final value loss, so a caller can compare restarts.
+    """
+    params, static = eqx.partition(start, eqx.is_inexact_array)
+
+    def value_loss(trained):
+        model = eqx.combine(trained, static)
+        return jnp.mean((jax.vmap(model)(inputs) - targets) ** 2)
+
+    def loss(trained, _):
+        residual = value_loss(trained)
+        if jacobians is None:
+            return residual
+        model = eqx.combine(trained, static)
+        model_jacobians = jax.vmap(jax.jacobian(model))(inputs)
+        mismatch = model_jacobians - jacobians
+        if derivative_columns is not None:
+            mismatch = mismatch[:, :, jnp.asarray(derivative_columns, dtype=int)]
+        return residual + derivative_weight * jnp.mean(mismatch**2)
+
+    solver = optx.OptaxMinimiser(optax.adam(learning_rate), rtol=1e-8, atol=1e-8)
+    fitted = optx.minimise(loss, solver, params, max_steps=steps, throw=False)
+    return eqx.combine(fitted.value, static), value_loss(fitted.value)
 
 
 def fit_network(
@@ -80,19 +123,14 @@ def fit_network(
         )
     else:
         start = initial
-    params, static = eqx.partition(start, eqx.is_inexact_array)
-
-    def loss(trained, _):
-        model = eqx.combine(trained, static)
-        residual = jnp.mean((jax.vmap(model)(inputs) - targets) ** 2)
-        if jacobians is None:
-            return residual
-        model_jacobians = jax.vmap(jax.jacobian(model))(inputs)
-        mismatch = model_jacobians - jacobians
-        if derivative_columns is not None:
-            mismatch = mismatch[:, :, jnp.asarray(derivative_columns, dtype=int)]
-        return residual + derivative_weight * jnp.mean(mismatch**2)
-
-    solver = optx.OptaxMinimiser(optax.adam(form.learning_rate), rtol=1e-8, atol=1e-8)
-    fitted = optx.minimise(loss, solver, params, max_steps=form.steps, throw=False)
-    return eqx.combine(fitted.value, static)
+    fitted, _ = minimize_squared_error(
+        start,
+        inputs,
+        targets,
+        learning_rate=form.learning_rate,
+        steps=form.steps,
+        jacobians=jacobians,
+        derivative_weight=derivative_weight,
+        derivative_columns=derivative_columns,
+    )
+    return fitted

@@ -24,8 +24,7 @@ from surreax.flatten import ravel
 from surreax.forms import (
     Affine,
     ChebyshevPolynomial,
-    DifferenceOfMaxAffineForm,
-    LinearForm,
+    Form,
     MaxAffineForm,
     NetworkForm,
 )
@@ -38,7 +37,6 @@ from surreax.reduction import (
 from surreax.structure import analyze
 
 Target = Callable[[PyTree[Array]], PyTree[Array]]
-Form = LinearForm | MaxAffineForm | DifferenceOfMaxAffineForm | NetworkForm
 Residual = Callable[[Float[Array, " n"], Float[Array, " m"]], Float[Array, " m"]]
 
 

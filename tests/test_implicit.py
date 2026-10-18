@@ -2,6 +2,7 @@
 
 import jax
 import jax.numpy as jnp
+import pytest
 
 import surreax as sx
 from surreax.implicit import (
@@ -424,3 +425,17 @@ def test_implicit_surrogate_survives_jit_vmap_and_grad() -> None:
     assert batched.shape == (2, 1)
     gradient = jax.grad(lambda z: surrogate(z)[0])(point)
     assert gradient.shape == (1,)
+
+
+def test_solvers_need_no_form_but_a_fit_does() -> None:
+    reduced = sx.ReducedSolve(
+        unknown_domain=_ROM_YDOMAIN, rank=2, snapshots=4, linear_solver="dense"
+    )
+    solver = sx.reduced_solver(_rom_linear, _ROM_XDOMAIN, reduced, samples=8)
+    assert solver(jnp.zeros(4)).shape == (32,)
+    with pytest.raises(ValueError, match="ReducedSolve needs a form"):
+        sx.fit_implicit(_rom_linear, _ROM_XDOMAIN, reduced, samples=8)
+
+    learned = sx.AutoencoderSolve(unknown_dimension=32, rank=2, steps=2, pretrain_steps=2)
+    with pytest.raises(ValueError, match="AutoencoderSolve needs a form"):
+        sx.fit_implicit(_rom_linear, _ROM_XDOMAIN, learned, samples=8)

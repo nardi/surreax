@@ -315,6 +315,10 @@ the input-to-latent map into an explicit surrogate, so inference needs no solve.
 This is the non-intrusive reduced-order model, POD-NN, of Hesthaven and Ubbiali,
 [POD-NN](https://doi.org/10.1016/j.jcp.2018.02.037).
 
+The `form` is the form of the input-to-latent map that `fit_implicit` fits. It is
+optional, since `reduced_solver` builds the solver without a surrogate, and
+`fit_implicit` raises an error if a method has none.
+
 The basis is linear here, which suits a solution manifold whose Kolmogorov
 n-width decays fast. A strongly curved manifold needs the learned manifold of a
 later section. The latent dimension is the `rank`, and the residual falls as it
@@ -375,9 +379,7 @@ def residual(x, y):
 
 
 domain = sx.box([-1.0, -1.0, -1.0], [1.0, 1.0, 1.0])
-method = sx.ReducedSolve(
-    form=sx.Affine(), unknown_domain=sx.box([-3.0] * 64, [3.0] * 64), rank=3, snapshots=16
-)
+method = sx.ReducedSolve(unknown_domain=sx.box([-3.0] * 64, [3.0] * 64), rank=3, snapshots=16)
 solver = sx.reduced_solver(residual, domain, method, samples=64)
 
 point = jnp.array([0.4, -0.2, 0.6])
@@ -409,8 +411,8 @@ follow a manifold that bends, in the manner of Lee and Carlberg,
 that the result is no longer a linear program, and the training is slower than a
 closed-form fit.
 
-`autoencoder_solver` returns the trained solver on its own, and `fit_implicit`
-distills it into a `DecodedSurrogate` that predicts the latent and decodes it, so
+`autoencoder_solver` returns the trained solver on its own, without a `form`, and
+`fit_implicit` distills it with the `form` of the method into a `DecodedSurrogate` that predicts the latent and decodes it, so
 inference needs no solve. Like the network form, it holds an activation function,
 so jit it with `equinox.filter_jit`.
 
@@ -430,9 +432,7 @@ def residual(x, y):
 
 
 domain = sx.box([-1.0, -1.0], [1.0, 1.0])
-method = sx.AutoencoderSolve(
-    form=sx.ChebyshevPolynomial(degree=3), unknown_dimension=32, rank=2, steps=400
-)
+method = sx.AutoencoderSolve(unknown_dimension=32, rank=2, steps=400)
 solver = sx.autoencoder_solver(residual, domain, method)
 
 # The residual the learned solve leaves, relative to the residual at zero.
@@ -528,10 +528,7 @@ def entry(x, i, near):
 residual = sx.StencilResidual(stencil=jnp.clip(index, 0, points - 1), entry=entry)
 domain = sx.box([0.0] * 4, [1.0] * 4)
 method = sx.ReducedSolve(
-    form=sx.Affine(),
-    unknown_domain=sx.box([-2.0] * points, [2.0] * points),
-    rank=6,
-    snapshots=32,
+    unknown_domain=sx.box([-2.0] * points, [2.0] * points), rank=6, snapshots=32
 )
 solver = sx.reduced_solver(residual, domain, method, samples=64)
 hyper = sx.hyper_reduce(solver, residual, domain)

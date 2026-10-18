@@ -122,7 +122,7 @@ def _reduced_oracle() -> ThermostatOracle:
 def _autoencoder_oracle() -> ThermostatOracle:
     # No full state is solved, the manifold is learned from the residual alone.
     system = implicit_systems.thermostat_rod(_POINTS)
-    method = sx.AutoencoderSolve(form=sx.Affine(), unknown_dimension=_POINTS, rank=3, steps=800)
+    method = sx.AutoencoderSolve(unknown_dimension=_POINTS, rank=3, steps=800)
     solver = sx.autoencoder_solver(system.residual, system.domain, method)
     assert float(solver.training_residual) < 0.05
     return ThermostatOracle(system, solver)

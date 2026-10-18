@@ -208,9 +208,10 @@ class AutoencoderSolve(eqx.Module):
     how close to a root they must get, as on `ExactSolve`.
     """
 
-    form: LinearForm
     unknown_dimension: int = eqx.field(static=True)
     rank: int = eqx.field(static=True)
+    form: LinearForm | None = None
+    """Form of the input-to-latent map that `fit_implicit` fits, not used by the solver."""
     width: int = eqx.field(static=True, default=32)
     depth: int = eqx.field(static=True, default=2)
     steps: int = eqx.field(static=True, default=1000)

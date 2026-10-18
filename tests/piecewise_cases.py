@@ -20,7 +20,6 @@ class Case:
     def __init__(self, system: implicit_systems.ImplicitSystem, rank: int, start: float) -> None:
         unknowns = system.unknown_domain.dimension
         method = sx.ReducedSolve(
-            form=sx.Affine(),
             # The diode exponentials make Newton diverge from far starts, so a small
             # start box keeps the snapshot solves converged.
             unknown_domain=sx.box([-start] * unknowns, [start] * unknowns),

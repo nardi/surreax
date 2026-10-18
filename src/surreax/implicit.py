@@ -529,9 +529,10 @@ class ReducedSolve(eqx.Module):
     POD-NN, https://doi.org/10.1016/j.jcp.2018.02.037.
     """
 
-    form: LinearForm
     unknown_domain: Domain
     rank: int = eqx.field(static=True)
+    form: LinearForm | None = None
+    """Form of the input-to-latent map that `fit_implicit` fits, not used by the solver."""
     snapshots: int = eqx.field(static=True, default=64)
     newton_steps: int = eqx.field(static=True, default=8)
     reduced_steps: int = eqx.field(static=True, default=8)
@@ -817,6 +818,7 @@ def _fit_reduced_order(
     ridge: float,
 ) -> FittedSurrogate:
     """Build the reduced solver, reduce-solve every sample, and distill."""
+    form = _latent_form(method)
     solver = _build_reduced_solver(residual, inputs[: method.snapshots], method)
     latents = jax.vmap(solver.latent)(inputs)
     projection = reduction.LinearReduction(
@@ -826,7 +828,14 @@ def _fit_reduced_order(
         decode_bias=solver.center,
     )
     return _distill_latent_map(
-        solver, inputs, latents, projection, method.form, holdout, ridge, method.derivative_weight
+        solver,
+        inputs,
+        latents,
+        projection,
+        form,
+        holdout,
+        ridge,
+        method.derivative_weight,
     )
 
 
@@ -1015,6 +1024,16 @@ def autoencoder_solver(
     )
 
 
+def _latent_form(method: ReducedSolve | AutoencoderSolve) -> LinearForm:
+    """The form of the latent map, which a fit needs and a solver on its own does not."""
+    if method.form is None:
+        raise ValueError(
+            f"{type(method).__name__} needs a form to fit a surrogate. Pass one as `form`, "
+            "or build the solver on its own."
+        )
+    return method.form
+
+
 def _fit_autoencoder(
     residual: Residual,
     domain: Domain,
@@ -1025,9 +1044,10 @@ def _fit_autoencoder(
     seed: int,
 ) -> DecodedSurrogate:
     """Train the solver, reduce-solve every sample, and distill the latent map."""
+    form = _latent_form(method)
     solver = autoencoder_solver(residual, domain, method, seed=seed)
     latents = jax.vmap(solver.latent)(inputs)
-    latent_map = fit_data(inputs, latents, method.form, holdout=holdout, ridge=ridge)
+    latent_map = fit_data(inputs, latents, form, holdout=holdout, ridge=ridge)
     return DecodedSurrogate(latent_map=latent_map, solver=solver, report=latent_map.report)
 
 

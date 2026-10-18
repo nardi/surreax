@@ -34,7 +34,6 @@ def test_exact_solve_raises_when_the_newton_solves_diverge() -> None:
 
 def _reduced_solve(tolerance: float | None) -> sx.ReducedSolve:
     return sx.ReducedSolve(
-        form=sx.Affine(),
         unknown_domain=_far_starts(),
         rank=4,
         snapshots=8,
@@ -58,7 +57,6 @@ def test_autoencoder_snapshots_are_checked_too() -> None:
 
     domain = sx.box([1.3], [1.5])
     method = sx.AutoencoderSolve(
-        form=sx.Affine(),
         unknown_dimension=2,
         rank=1,
         snapshots=4,

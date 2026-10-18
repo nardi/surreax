@@ -358,6 +358,12 @@ class ExactSolve(eqx.Module):
     A positive `derivative_weight` also fits the Jacobian of the reduced
     coefficients in the input, which the implicit function theorem gives from
     one transposed solve per coefficient at each solved sample.
+
+    Each solve must reach a residual of at most `convergence_tolerance` times
+    the residual at the zero state, or the fit raises an error. Newton diverges from a
+    start far from a root of a stiff residual, and a basis built from states
+    that did not converge is wrong without any other sign. Setting it to None
+    skips the check.
     """
 
     form: LinearForm
@@ -365,6 +371,7 @@ class ExactSolve(eqx.Module):
     rank: int | None = eqx.field(static=True, default=None)
     variance: float = eqx.field(static=True, default=0.99)
     newton_steps: int = eqx.field(static=True, default=8)
+    convergence_tolerance: float | None = eqx.field(static=True, default=1e-3)
     linear_solver: LinearSolver = eqx.field(static=True, default="sparse")
     reuse: splineax.HybridSettings | None = eqx.field(static=True, default=None)
     derivative_weight: float = eqx.field(static=True, default=0.0)
@@ -414,7 +421,9 @@ def _fit_exact_solve(
     """Solve the residual for every sample, then fit the reduced output map."""
     starts = sampling.sample(method.unknown_domain, inputs.shape[0], seed=_START_SEED)
     setup = newton_setup(residual, method.linear_solver, method.reuse, inputs[0], starts[0])
-    unknowns = _solve_independently_with(setup, residual, inputs, starts, method.newton_steps)
+    unknowns = _solve_to_convergence(
+        setup, residual, inputs, starts, method.newton_steps, method.convergence_tolerance
+    )
     reduce_outputs = reduction.pca_outputs(rank=method.rank, variance=method.variance)
     if method.derivative_weight <= 0.0:
         return fit_data(
@@ -440,6 +449,38 @@ def _fit_exact_solve(
         reduce_outputs=lambda outputs: projection,
         output_jacobians=jacobians,
         derivative_weight=method.derivative_weight,
+    )
+
+
+def _solve_to_convergence(
+    setup: "NewtonSetup",
+    residual: Residual,
+    inputs: Float[Array, "n d"],
+    starts: Float[Array, "n m"],
+    newton_steps: int,
+    tolerance: float | None,
+) -> Float[Array, "n m"]:
+    """Newton-solve every sample, and raise if any solve did not reach a root.
+
+    A solve has converged when its residual norm is at most `tolerance` times the
+    residual norm at the zero state, plus a floor of a hundred machine epsilons for
+    an input whose zero state is already a root. The zero state sets the scale
+    because the residual at a far start can be astronomically large, which would
+    make any ratio to it small. The check runs inside `eqx.error_if`, so it also
+    works under `jit`. A `tolerance` of None skips it.
+    """
+    unknowns = _solve_independently_with(setup, residual, inputs, starts, newton_steps)
+    if tolerance is None:
+        return unknowns
+    left = jnp.linalg.norm(jax.vmap(residual)(inputs, unknowns), axis=1)
+    scale = jnp.linalg.norm(jax.vmap(residual)(inputs, jnp.zeros_like(unknowns)), axis=1)
+    floor = 100.0 * jnp.finfo(unknowns.dtype).eps
+    return eqx.error_if(
+        unknowns,
+        jnp.any(left > tolerance * scale + floor),
+        "The Newton solves for the full states did not converge. Start closer to a "
+        "root with a smaller unknown_domain, raise newton_steps, or set "
+        "convergence_tolerance to None to skip this check.",
     )
 
 
@@ -494,6 +535,7 @@ class ReducedSolve(eqx.Module):
     snapshots: int = eqx.field(static=True, default=64)
     newton_steps: int = eqx.field(static=True, default=8)
     reduced_steps: int = eqx.field(static=True, default=8)
+    convergence_tolerance: float | None = eqx.field(static=True, default=1e-3)
     linear_solver: LinearSolver = eqx.field(static=True, default="sparse")
     reuse: splineax.HybridSettings | None = eqx.field(static=True, default=None)
     derivative_weight: float = eqx.field(static=True, default=0.0)
@@ -688,7 +730,14 @@ def _solve_snapshots(
     if setup is None:
         setup = _snapshot_setup(residual, snapshot_inputs, method)
     starts = sampling.sample(method.unknown_domain, snapshot_inputs.shape[0], seed=_START_SEED)
-    return _solve_independently_with(setup, residual, snapshot_inputs, starts, method.newton_steps)
+    return _solve_to_convergence(
+        setup,
+        residual,
+        snapshot_inputs,
+        starts,
+        method.newton_steps,
+        method.convergence_tolerance,
+    )
 
 
 def _greedy_states(
@@ -947,8 +996,13 @@ def autoencoder_solver(
     setup = newton_setup(
         residual, method.linear_solver, method.reuse, snapshot_inputs[0], starts[0]
     )
-    states = _solve_independently_with(
-        setup, residual, snapshot_inputs, starts, method.newton_steps
+    states = _solve_to_convergence(
+        setup,
+        residual,
+        snapshot_inputs,
+        starts,
+        method.newton_steps,
+        method.convergence_tolerance,
     )
     return train_autoencoder(
         residual,
@@ -1004,6 +1058,7 @@ def recommend_reduced_method(
         rank=method.rank,
         snapshots=method.snapshots,
         newton_steps=method.newton_steps,
+        convergence_tolerance=method.convergence_tolerance,
         linear_solver=method.linear_solver,
         reuse=method.reuse,
     )

@@ -337,9 +337,9 @@ def test_reduced_solver_reports_good_conditioning_on_one_root() -> None:
 
 
 def test_reduced_solver_flags_multiple_roots_and_ill_conditioning() -> None:
-    solver = sx.reduced_solver(
-        _rom_bistable, _ROM_XDOMAIN, _rom_method(reduced_steps=15), samples=64
-    )
+    # Newton converges only linearly near a fold, so the snapshot check is off.
+    method = _rom_method(reduced_steps=15, convergence_tolerance=None)
+    solver = sx.reduced_solver(_rom_bistable, _ROM_XDOMAIN, method, samples=64)
     assert solver.report.multiple_roots
     assert float(solver.report.min_conditioning) < 0.1
 

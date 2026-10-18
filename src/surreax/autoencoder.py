@@ -204,7 +204,8 @@ class AutoencoderSolve(eqx.Module):
     random start, so a positive `snapshots` solves that many full states first
     and pretrains the autoencoder to reconstruct them, starting from their linear
     basis, before the residual training refines it. `linear_solver` and `reuse`
-    set how those snapshot solves factor their Jacobian, as on `ExactSolve`.
+    set how those snapshot solves factor their Jacobian, and `convergence_tolerance`
+    how close to a root they must get, as on `ExactSolve`.
     """
 
     form: LinearForm
@@ -220,6 +221,7 @@ class AutoencoderSolve(eqx.Module):
     snapshots: int = eqx.field(static=True, default=0)
     pretrain_steps: int = eqx.field(static=True, default=2000)
     newton_steps: int = eqx.field(static=True, default=8)
+    convergence_tolerance: float | None = eqx.field(static=True, default=1e-3)
     linear_solver: LinearSolver = eqx.field(static=True, default="sparse")
     reuse: splineax.HybridSettings | None = eqx.field(static=True, default=None)
 

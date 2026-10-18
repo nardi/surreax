@@ -1,11 +1,8 @@
 """Piecewise linear approximations of implicit test systems.
 
-The radiating rod and the diode network are smooth, so their solutions are not
-piecewise linear and each fit here is an approximation. Fitting the latent
-coefficients of a reduced solver keeps the structure, since the decode back to the
-field is affine, so a piecewise linear latent is a piecewise linear field. The rod
-has two inputs and 32 points. The network is a 12 by 12 mesh of 144 nodes with four
-sources, wired with random long wires and a diode on every third wire.
+The radiating rod, the diode network and the thermostat rod are smooth, so their
+solutions are not piecewise linear and each fit here is an approximation, see
+`piecewise_cases` for how the latent coefficients of a reduced solver are fitted.
 """
 
 import jax
@@ -13,57 +10,12 @@ import jax.numpy as jnp
 import pytest
 
 import surreax as sx
-from tests import implicit_systems
+from tests.piecewise_cases import Case, build
 
 
-class Case:
-    """A reduced solver of an implicit system, with the box its inputs are drawn from."""
-
-    def __init__(self, system: implicit_systems.ImplicitSystem, rank: int, start: float) -> None:
-        unknowns = system.unknown_domain.dimension
-        method = sx.ReducedSolve(
-            form=sx.Affine(),
-            # The diode exponentials make Newton diverge from far starts, so a small
-            # start box keeps the snapshot solves converged.
-            unknown_domain=sx.box([-start] * unknowns, [start] * unknowns),
-            rank=rank,
-            snapshots=48,
-            newton_steps=14,
-            reduced_steps=12,
-            linear_solver="dense",
-        )
-        self.domain = system.domain
-        self.residual = system.residual
-        self.solver = sx.reduced_solver(system.residual, system.domain, method, samples=96)
-        unit = jax.random.uniform(jax.random.key(7), (100, system.domain.dimension))
-        self.points = system.domain.sample_unit(unit)
-        self.latent = jax.vmap(self.solver.latent)(self.points)
-
-    def latent_error(self, surrogate: sx.FittedSurrogate) -> float:
-        """Mean latent error of a surrogate over the mean latent norm."""
-        predicted = jax.vmap(surrogate)(self.points)
-        return float(
-            jnp.mean(jnp.linalg.norm(predicted - self.latent, axis=1))
-            / jnp.mean(jnp.linalg.norm(self.latent, axis=1))
-        )
-
-    def fit(
-        self, form: sx.Affine | sx.MaxAffineForm | sx.DifferenceOfMaxAffineForm
-    ) -> sx.FittedSurrogate:
-        return sx.fit(
-            self.solver.latent,
-            self.domain,
-            form,
-            samples=512,
-            worst_case_starts=0,
-        )
-
-
-@pytest.fixture(scope="module", params=["rod", "network"])
+@pytest.fixture(scope="module", params=["rod", "network", "thermostat"])
 def case(request: pytest.FixtureRequest) -> Case:
-    if request.param == "rod":
-        return Case(implicit_systems.radiating_rod(32, heaters=2), rank=2, start=2.0)
-    return Case(implicit_systems.diode_network(12, 12, sources=4), rank=4, start=0.5)
+    return build(request.param)
 
 
 def test_a_difference_of_max_affine_approximates_the_system_better_than_an_affine_fit(

@@ -163,6 +163,100 @@ surrogate = sx.fit(smooth, domain, form, samples=256, worst_case_starts=0)
 assert float(surrogate.report.value_mean) < 0.02
 ```
 
+## Convex network
+
+`ConvexNetworkForm` is an input-convex neural network, from Amos, Xu and Kolter,
+[Input Convex Neural Networks](https://arxiv.org/abs/1609.07400). Its hidden
+layers use ReLU activations, its weights from one hidden layer to the next are
+nonnegative, and every layer also reads the input directly. Each output is then a
+convex piecewise linear function of the input, which is the same set of functions
+as the max-affine form. A solver minimizes it as a linear program with one
+auxiliary variable per hidden unit, so the program grows with the number of
+units, not with the number of affine pieces.
+
+That is the difference from a max-affine fit. The sum `|x0| + ... + |x5|` of six
+inputs has 64 affine pieces as a maximum, and a network writes it with about a
+dozen units. The nonnegative weights are the softplus of free parameters, and the
+fit is gradient descent through optimistix from several random starts, keeping the
+best. `depth` is the number of hidden layers.
+
+<!-- name: test_forms_convex_network -->
+```python
+import jax.numpy as jnp
+import surreax as sx
+
+
+def spread(x):
+    return jnp.sum(jnp.abs(x))[None]
+
+
+domain = sx.box([-1.0] * 3, [1.0] * 3)
+form = sx.ConvexNetworkForm(width=8, depth=2, steps=1200)
+surrogate = sx.fit(spread, domain, form, samples=512, worst_case_starts=0)
+assert float(surrogate.report.value_mean) < 0.05
+
+# The exported layers act on the original input, with nonnegative hidden weights.
+export = sx.export(surrogate)
+assert all(bool(jnp.all(weights >= 0)) for weights in export.hidden_weights)
+```
+
+## ReLU network
+
+`ReluNetworkForm` is a plain multilayer perceptron with ReLU activations. It
+represents every continuous piecewise linear function, the same set as the
+difference of max-affine form, so it fits targets that are neither convex nor
+concave. A mixed-integer program encodes it with one binary variable per hidden
+unit, each with a pair of big-M constraints. It trains the same way as the convex
+network.
+
+Both network forms have the same function classes as the max-affine forms, so
+the choice is about size and about how well the fit trains. The comparison below
+comes from the test suite, with errors relative to the target on held-out points.
+
+- A target that is a sum of ridge functions in many inputs favors the networks.
+  On `|x0 - x1| - |x2 + 0.3 x3| + 0.5 x4` in six inputs, a ReLU network with 253
+  parameters reaches a mean error of 5e-4, and a difference of max-affine with 24
+  and 24 pieces and 336 parameters reaches 0.33. On the sum of absolute values the
+  convex network reaches 0.036, the ReLU network 1e-3, and 48 max-affine pieces
+  0.16.
+- A smooth response in few inputs favors the older forms at a small size. For the
+  latent coefficients of the radiating rod and the thermostat rod, a difference of
+  max-affine with 4 and 4 pieces matched a ReLU network with about twice the
+  parameters. On the four-input diode network, 8 and 8 pieces reached 0.0044
+  against 0.0094 for a ReLU network with a similar parameter count. A wider ReLU
+  network did overtake the pieces on the rod, at 0.0096 with 354 parameters
+  against 0.017 with 96.
+- A convex network cannot follow a response that is not convex. On the rod and the
+  thermostat rod it left more than three times the error of a ReLU network.
+- The convex network trains less reliably than a plain one. On the mildly
+  nonconvex diode network it reached 0.017, no better than max-affine with 16
+  pieces at 0.012, and a wider network did worse at 0.025, so try a few widths.
+
+<!-- name: test_forms_relu_network -->
+```python
+import jax.numpy as jnp
+import surreax as sx
+
+
+def difference(x):
+    return (jnp.abs(x[0] - 0.2) - jnp.abs(x[1] + 0.3))[None]
+
+
+domain = sx.box([-1.0, -1.0], [1.0, 1.0])
+form = sx.ReluNetworkForm(width=8, depth=2, steps=1500)
+surrogate = sx.fit(difference, domain, form, samples=512, worst_case_starts=0)
+assert float(surrogate.report.value_mean) < 0.05
+
+# The exported layers reproduce the surrogate on the original input.
+export = sx.export(surrogate)
+point = jnp.array([0.3, -0.6])
+activation = point
+for weights, biases in zip(export.weights[:-1], export.biases[:-1], strict=True):
+    activation = jnp.maximum(weights @ activation + biases, 0.0)
+by_hand = export.weights[-1] @ activation + export.biases[-1]
+assert jnp.allclose(by_hand, surrogate(point), atol=1e-4)
+```
+
 ## Grid
 
 The grid form places a regular grid over the input box and interpolates
@@ -195,7 +289,8 @@ The point of a piecewise linear form is that a solver can reason about it. A
 max-affine surrogate is a maximum of affine pieces, so it is a linear program,
 and a difference of two is a pair of them. `export` returns the slopes and
 intercepts as plain arrays, in the domain's flat coordinates, so you can write
-the encoding in whatever optimization framework you use. For a box those are the
+the encoding in whatever optimization framework you use. The network forms export
+their layer matrices the same way. For a box those are the
 inputs themselves, and for a `LogRange` input it is its logarithm. The library exports arrays
 and nothing else, to stay free of a solver dependency. For the mixed-integer and
 linear-program encodings these arrays feed, see

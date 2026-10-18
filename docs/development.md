@@ -37,8 +37,9 @@ and jaxtyping with beartype checks array shapes at runtime during tests.
 
 - Each pipeline stage is its own module, `flatten`, `domain`, `sampling`,
   `normalize`, `reduction`, `fitting`, `report`, `fitted`.
-- The model forms live under `forms`, with the protocol in `forms/protocol.py`,
-  and `export` turns the piecewise linear ones into arrays.
+- The model forms live under `forms`, with the protocol in `forms/protocol.py`.
+  The two ReLU network forms are in `forms/relu_network.py`, and `export` turns
+  the piecewise linear forms into arrays.
 - `api` holds `fit`, `fit_adaptive` and `fit_constrained`, and `composite` holds
   `fit_separable`.
 - `structure` reads the dependency structure from the Jacobian, `strategy` reads

@@ -284,6 +284,24 @@ reduced coefficients in the input. The implicit function theorem gives it from
 one transposed solve per coefficient at each solved sample, reusing the solver of
 the Newton steps, so the full Jacobian of the unknown is never formed.
 
+### Convergence of the Newton solves
+
+Newton diverges from a start far from a root of a stiff residual, such as one with
+exponentials. The basis and the fit then use states that are not roots, and nothing
+else shows it. `ExactSolve`, `ReducedSolve` and `AutoencoderSolve` therefore check
+every full solve and raise an error if one did not converge. A solve has converged
+when its residual norm is at most `convergence_tolerance` times the residual norm
+at the zero state, which is 1e-3 by default. The check also runs under `jit`,
+through `equinox.error_if`.
+
+The reference is the zero state and not the start of the solve. The residual at
+a far start can be astronomically large, so a ratio to it would pass a solve that
+is still far from a root.
+
+A smaller `unknown_domain` or more `newton_steps` fixes most failures. Near a fold,
+Newton converges only linearly, and a deliberately ill-conditioned system may need
+`convergence_tolerance=None` to skip the check.
+
 ## The reduced-order model
 
 `ExactSolve` solves the full residual once per sample. When many samples are

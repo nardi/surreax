@@ -67,8 +67,9 @@ which leads to a few different choices:
 ## Status
 
 `surreax` fits explicit targets with the affine, Chebyshev polynomial, convex
-max-affine, difference-of-max-affine, grid, and feedforward network forms, and
-exports the piecewise linear ones as arrays for a solver. A domain can mix boxes
+max-affine, difference-of-max-affine, grid, and feedforward network forms. Two ReLU
+network forms, an input-convex one and a general one, are piecewise linear too.
+The piecewise linear forms export as arrays for a solver. A domain can mix boxes
 with log-scaled, normal, integer, and categorical inputs, or be inferred from a
 dataset, in which case the surrogate reports how far a query lies from the data.
 

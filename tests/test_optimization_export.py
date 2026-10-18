@@ -7,14 +7,19 @@ approximation, so the full system meets the constraints up to the fit error, and
 the cost lands near the best cost over a grid of full solves.
 """
 
+from collections.abc import Callable
+
 import jax
 import jax.numpy as jnp
 import numpy as np
 import pytest
 
 import surreax as sx
+from tests import implicit_systems
 from tests.optimization_encodings import minimize_convex, minimize_relu
 from tests.piecewise_cases import Case, build
+
+_POINTS = 32
 
 _ROD_SENSORS = jnp.array([15, 7])
 _ROD_TARGET = np.array([0.8, 0.8])
@@ -25,20 +30,19 @@ _THERMOSTAT_FLOOR = 0.4
 _THERMOSTAT_COST = np.array([-0.3, -1.0])
 
 
-def _full_states(case: Case, inputs: np.ndarray) -> np.ndarray:
+def _full_states(residual: sx.Residual, inputs: np.ndarray) -> np.ndarray:
     """Solve the full residual by Newton from the zero state at every input."""
-    unknowns = case.solver.center.shape[0]
 
     def solve(x: jax.Array) -> jax.Array:
         def step(y: jax.Array, _: None) -> tuple[jax.Array, None]:
-            jacobian = jax.jacobian(case.residual, argnums=1)(x, y)
-            return y - jnp.linalg.solve(jacobian, case.residual(x, y)), None
+            jacobian = jax.jacobian(residual, argnums=1)(x, y)
+            return y - jnp.linalg.solve(jacobian, residual(x, y)), None
 
-        return jax.lax.scan(step, jnp.zeros(unknowns), None, length=40)[0]
+        return jax.lax.scan(step, jnp.zeros(_POINTS), None, length=40)[0]
 
     states = jax.jit(jax.vmap(solve))(jnp.asarray(inputs))
     # A state that is not a root would make the checks below meaningless.
-    residuals = jax.vmap(case.residual)(jnp.asarray(inputs), states)
+    residuals = jax.vmap(residual)(jnp.asarray(inputs), states)
     assert float(jnp.max(jnp.abs(residuals))) < 1e-4
     return np.asarray(states)
 
@@ -86,31 +90,60 @@ def test_the_least_heater_power_plan_of_a_convex_surrogate_holds_on_the_rod(
     assert np.all(-np.asarray(surrogate(jnp.asarray(power))) >= _ROD_TARGET - 1e-4)
 
     # The full rod at that power meets the target up to the fit error.
-    sensors = _full_states(rod, power[None])[0][np.asarray(_ROD_SENSORS)]
+    sensors = _full_states(rod.residual, power[None])[0][np.asarray(_ROD_SENSORS)]
     assert np.all(sensors >= _ROD_TARGET - 0.04)
 
     # The cheapest power on a grid of full solves is a reference for the cost.
     grid = _grid(rod.domain, (41, 41))
-    temperatures = _full_states(rod, grid)[:, np.asarray(_ROD_SENSORS)]
+    temperatures = _full_states(rod.residual, grid)[:, np.asarray(_ROD_SENSORS)]
     feasible = np.all(temperatures >= _ROD_TARGET, axis=1)
     cheapest = grid[feasible].sum(axis=1).min()
     assert abs(power.sum() - cheapest) < 0.1 * cheapest
 
 
-@pytest.fixture(scope="module")
-def thermostat() -> Case:
-    return build("thermostat")
+class ThermostatOracle:
+    """A cheap solver of the thermostat rod, with the system it approximates."""
+
+    def __init__(
+        self,
+        system: implicit_systems.ImplicitSystem,
+        field: Callable[[jax.Array], jax.Array],
+    ) -> None:
+        self.domain = system.domain
+        self.residual = system.residual
+        self.field = field
+
+
+def _reduced_oracle() -> ThermostatOracle:
+    case = build("thermostat")
+    return ThermostatOracle(implicit_systems.thermostat_rod(_POINTS), case.solver)
+
+
+def _autoencoder_oracle() -> ThermostatOracle:
+    # No full state is solved, the manifold is learned from the residual alone.
+    system = implicit_systems.thermostat_rod(_POINTS)
+    method = sx.AutoencoderSolve(form=sx.Affine(), unknown_dimension=_POINTS, rank=3, steps=800)
+    solver = sx.autoencoder_solver(system.residual, system.domain, method)
+    assert float(solver.training_residual) < 0.05
+    return ThermostatOracle(system, solver)
+
+
+@pytest.fixture(scope="module", params=["reduced", "autoencoder"])
+def thermostat(request: pytest.FixtureRequest) -> ThermostatOracle:
+    return _reduced_oracle() if request.param == "reduced" else _autoencoder_oracle()
 
 
 def test_the_mixed_integer_plan_of_a_relu_network_holds_on_the_thermostat_rod(
-    thermostat: Case,
+    thermostat: ThermostatOracle,
 ) -> None:
     # The thermostat holds the rod near its setpoint and then lets go, so the
     # temperature is not convex in the ambient and the load, and a ReLU network is
     # needed. The plan maximizes the load and the ambient subject to a process
     # window: the patch must stay below a limit and the far end above a floor.
+    # The oracle is a reduced solver on a linear basis of solved states in one
+    # run and an autoencoder trained on the residual alone in the other.
     surrogate = sx.fit(
-        lambda x: thermostat.solver(x)[_THERMOSTAT_SENSORS],
+        lambda x: thermostat.field(x)[_THERMOSTAT_SENSORS],
         thermostat.domain,
         sx.ReluNetworkForm(width=16, depth=2),
         samples=512,
@@ -134,13 +167,13 @@ def test_the_mixed_integer_plan_of_a_relu_network_holds_on_the_thermostat_rod(
     assert _THERMOSTAT_COST @ plan <= (grid[window] @ _THERMOSTAT_COST).min() + 1e-6
 
     # The full rod at the plan meets the window up to the fit error.
-    sensors = _full_states(thermostat, plan[None])[0][np.asarray(_THERMOSTAT_SENSORS)]
+    sensors = _full_states(thermostat.residual, plan[None])[0][np.asarray(_THERMOSTAT_SENSORS)]
     assert sensors[0] <= _THERMOSTAT_LIMIT + 0.03
     assert sensors[1] >= _THERMOSTAT_FLOOR - 0.03
 
     # The best plan on a grid of full solves is a reference for the objective.
     coarse = _grid(thermostat.domain, (46, 21))
-    states = _full_states(thermostat, coarse)[:, np.asarray(_THERMOSTAT_SENSORS)]
+    states = _full_states(thermostat.residual, coarse)[:, np.asarray(_THERMOSTAT_SENSORS)]
     inside = (states[:, 0] <= _THERMOSTAT_LIMIT) & (states[:, 1] >= _THERMOSTAT_FLOOR)
     best = (coarse[inside] @ _THERMOSTAT_COST).min()
     assert abs(_THERMOSTAT_COST @ plan - best) < 0.1

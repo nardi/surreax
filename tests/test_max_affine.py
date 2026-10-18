@@ -94,6 +94,7 @@ def test_a_piece_without_samples_keeps_its_previous_plane() -> None:
     planes = _least_squares_pieces(augmented, target, assignment, 3, prior)
     assert jnp.allclose(planes[0], prior[0], atol=1e-3)
     assert jnp.allclose(planes[1:], prior[1:], atol=1e-3)
-    # Without a prior an empty piece falls to the zero plane.
-    unanchored = _least_squares_pieces(augmented, target, assignment, 3, None)
+    # With a zero prior an empty piece falls to the zero plane.
+    zeros = jnp.zeros((3, 3))
+    unanchored = _least_squares_pieces(augmented, target, assignment, 3, zeros)
     assert jnp.allclose(unanchored[1:], 0.0, atol=1e-3)

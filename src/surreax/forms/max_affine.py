@@ -83,7 +83,9 @@ def _alternating(
     """
     initial = jax.random.randint(key, (augmented.shape[0],), 0, pieces)
     everything = jnp.ones((augmented.shape[0],), dtype=jnp.int32)
-    prior = jnp.tile(_least_squares_pieces(augmented, target, everything, 1, None), (pieces, 1))
+    zero_plane = jnp.zeros((1, augmented.shape[1]), dtype=augmented.dtype)
+    affine_plane = _least_squares_pieces(augmented, target, everything, 1, zero_plane)
+    prior = jnp.tile(affine_plane, (pieces, 1))
     prior_error = _mean_squared_error(prior, augmented, target)
 
     def step(_, state):
@@ -109,20 +111,18 @@ def _least_squares_pieces(
     target: Float[Array, " n"],
     assignment: Int[Array, " n"],
     pieces: int,
-    prior: Float[Array, "m p"] | None,
+    prior: Float[Array, "m p"],
 ) -> Float[Array, "m p"]:
     """Refit every piece by least squares on the samples assigned to it.
 
-    A small ridge pulls each piece toward its plane in `prior`, or toward zero
-    without one. A piece that lost all its samples then keeps its plane, and one
-    left with fewer samples than parameters keeps the prior in the directions
-    those samples do not fix. Pulling toward zero instead leaves an empty piece at
-    the zero plane, which clips the maximum at zero, and shrinks a small piece
-    toward zero, so the fit gets worse as pieces outnumber what the target needs.
+    A small ridge pulls each piece toward its plane in `prior`. A piece that lost
+    all its samples then keeps its plane, and one left with fewer samples than
+    parameters keeps the prior in the directions those samples do not fix. A zero
+    `prior` instead leaves an empty piece at the zero plane, which clips the
+    maximum at zero, and shrinks a small piece toward zero, so the fit gets worse
+    as pieces outnumber what the target needs.
     """
     parameters = augmented.shape[1]
-    if prior is None:
-        prior = jnp.zeros((pieces, parameters), dtype=augmented.dtype)
 
     def fit_piece(index, plane):
         weights = (assignment == index).astype(augmented.dtype)

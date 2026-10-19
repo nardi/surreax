@@ -1,5 +1,7 @@
 """Tests for implicit fitting through the inverse map and the objective route."""
 
+from typing import Any
+
 import jax
 import jax.numpy as jnp
 import pytest
@@ -109,6 +111,7 @@ def test_two_branch_residual_stays_on_one_branch() -> None:
     surrogate = sx.fit_implicit(
         _square, domain, method, sx.ChebyshevPolynomial(degree=4), samples=256
     )
+    assert isinstance(surrogate, sx.ImplicitSurrogate)
     points = jnp.linspace(0.3, 0.95, 20)[:, None]
     predictions = jax.vmap(surrogate)(points)[:, 0]
     assert bool(jnp.all(predictions > 0)) or bool(jnp.all(predictions < 0))
@@ -123,6 +126,7 @@ def test_fold_is_flagged_where_the_jacobian_turns_singular() -> None:
         unknown_domain=sx.box([0.05], [1.1]), newton_steps=6, fold_tolerance=0.3
     )
     fold_fit = sx.fit_implicit(_square, sx.box([0.0], [1.0]), folding, quartic, samples=256)
+    assert isinstance(fold_fit, sx.ImplicitSurrogate)
     assert fold_fit.fold.folds
     assert float(fold_fit.fold.boundary_point[0]) < 0.1
 
@@ -130,6 +134,7 @@ def test_fold_is_flagged_where_the_jacobian_turns_singular() -> None:
         unknown_domain=sx.box([-1.2], [1.2]), newton_steps=2, fold_tolerance=0.3
     )
     monotone_fit = sx.fit_implicit(_cubic, sx.box([-2.0], [2.0]), monotone, quartic, samples=256)
+    assert isinstance(monotone_fit, sx.ImplicitSurrogate)
     assert not monotone_fit.fold.folds
     assert float(monotone_fit.fold.min_determinant) > float(fold_fit.fold.min_determinant)
 
@@ -189,6 +194,7 @@ def test_exact_solve_fits_a_large_sparse_system() -> None:
     method = sx.ExactSolve(unknown_domain=sx.box([-3.0] * 64, [3.0] * 64), rank=3, newton_steps=5)
     surrogate = sx.fit_implicit(_diffusion, domain, method, sx.Affine(), samples=128)
     # The 64 unknowns collapse to 3 coefficients, and the fit stays exact.
+    assert isinstance(surrogate, sx.FittedSurrogate)
     assert surrogate.output_reduction.encode_matrix.shape[0] == 3
     assert float(surrogate.report.value_mean) < 1e-3
 
@@ -239,6 +245,7 @@ def test_reduced_order_fits_from_few_snapshots() -> None:
         reduced_steps=5,
     )
     surrogate = sx.fit_implicit(_linear_diffusion, domain, method, sx.Affine(), samples=128)
+    assert isinstance(surrogate, sx.FittedSurrogate)
     assert surrogate.output_reduction.decode_matrix.shape == (64, 3)
     assert float(surrogate.report.value_mean) < 1e-3
 
@@ -295,7 +302,9 @@ def _rom_bistable(x: jax.Array, y: jax.Array) -> jax.Array:
 
 
 def _rom_method(**overrides: object) -> sx.ReducedSolve:
-    settings: dict[str, object] = {
+    # Each value is checked by the constructor that receives the keyword arguments,
+    # so the values are not narrowed here.
+    settings: dict[str, Any] = {
         "unknown_domain": _ROM_YDOMAIN,
         "rank": 4,
         "snapshots": 16,
@@ -304,7 +313,7 @@ def _rom_method(**overrides: object) -> sx.ReducedSolve:
         "linear_solver": "dense",
     }
     settings.update(overrides)
-    return sx.ReducedSolve(**settings)  # type: ignore[arg-type]
+    return sx.ReducedSolve(**settings)
 
 
 @pytest.mark.slow
@@ -409,6 +418,8 @@ def test_derivative_supervision_lowers_the_jacobian_error() -> None:
     supervised = sx.fit_implicit(
         _rom_cubic, _ROM_XDOMAIN, _rom_method(derivative_weight=1.0), form, samples=40
     )
+    assert isinstance(plain, sx.FittedSurrogate)
+    assert isinstance(supervised, sx.FittedSurrogate)
     assert jacobian_error(supervised) < jacobian_error(plain) / 2
 
 

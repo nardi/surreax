@@ -1,5 +1,8 @@
 """Tests for the reduced-order model on a learned manifold."""
 
+from collections.abc import Callable
+from typing import Any
+
 import equinox as eqx
 import jax
 import jax.numpy as jnp
@@ -28,7 +31,7 @@ def _radiating_rod(x: jax.Array, y: jax.Array) -> jax.Array:
     return -laplacian + 0.5 * y + 0.3 * y**3 - x @ _MODES
 
 
-def _relative_residual(surrogate: eqx.Module) -> float:
+def _relative_residual(surrogate: Callable[[jax.Array], jax.Array]) -> float:
     points = jax.random.uniform(jax.random.key(4), (64, 4), minval=-1.0, maxval=1.0)
     left = jax.vmap(lambda x: jnp.linalg.norm(_radiating_rod(x, surrogate(x))))(points)
     base = jax.vmap(lambda x: jnp.linalg.norm(_radiating_rod(x, jnp.zeros(32))))(points)
@@ -36,13 +39,15 @@ def _relative_residual(surrogate: eqx.Module) -> float:
 
 
 def _method(**overrides: object) -> sx.AutoencoderSolve:
-    settings: dict[str, object] = {
+    # Each value is checked by the constructor that receives the keyword arguments,
+    # so the values are not narrowed here.
+    settings: dict[str, Any] = {
         "unknown_dimension": 32,
         "rank": 4,
         "steps": 800,
     }
     settings.update(overrides)
-    return sx.AutoencoderSolve(**settings)  # type: ignore[arg-type]
+    return sx.AutoencoderSolve(**settings)
 
 
 @pytest.fixture(scope="module")
@@ -108,7 +113,7 @@ def test_learned_manifold_beats_a_linear_basis_on_a_moving_front() -> None:
     points = jax.random.uniform(jax.random.key(4), (64, 2))
     base = jnp.mean(jax.vmap(lambda x: jnp.linalg.norm(pipe.residual(x, jnp.zeros(64))))(points))
 
-    def relative(solver: eqx.Module) -> float:
+    def relative(solver: Callable[[jax.Array], jax.Array]) -> float:
         left = jax.vmap(lambda x: jnp.linalg.norm(pipe.residual(x, solver(x))))(points)
         return float(jnp.mean(left) / base)
 

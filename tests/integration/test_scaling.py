@@ -37,6 +37,7 @@ def test_reduced_solve_scales_to_a_large_field() -> None:
         samples=64,
     )
     # The large field is predicted through four latent coefficients.
+    assert isinstance(surrogate, sx.FittedSurrogate)
     assert surrogate.output_reduction.decode_matrix.shape == (systems.LARGE_STATE, 4)
     assert float(surrogate.report.value_mean) / _baseline_residual() < 1e-3
 
@@ -54,6 +55,7 @@ def test_exact_solve_scales_to_a_large_field() -> None:
         sx.Affine(),
         samples=64,
     )
+    assert isinstance(surrogate, sx.FittedSurrogate)
     assert surrogate.output_reduction.encode_matrix.shape == (4, systems.LARGE_STATE)
     assert float(surrogate.report.value_mean) / _baseline_residual() < 1e-3
 

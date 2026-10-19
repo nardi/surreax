@@ -1,5 +1,7 @@
 """Reduced-order methods on the physical systems: trust reports and linear exactness."""
 
+from typing import Any
+
 import jax
 import jax.numpy as jnp
 
@@ -10,7 +12,9 @@ from tests import implicit_systems
 def _linear_solver(
     system: implicit_systems.ImplicitSystem, rank: int, **settings: object
 ) -> sx.ReducedSolver:
-    options: dict[str, object] = {
+    # Each value is checked by the constructor that receives the keyword arguments,
+    # so the values are not narrowed here.
+    options: dict[str, Any] = {
         "snapshots": 32,
         "newton_steps": 12,
         "reduced_steps": 10,
@@ -20,7 +24,7 @@ def _linear_solver(
     method = sx.ReducedSolve(
         unknown_domain=system.unknown_domain,
         rank=rank,
-        **options,  # type: ignore[arg-type]
+        **options,
     )
     return sx.reduced_solver(system.residual, system.domain, method, samples=64)
 

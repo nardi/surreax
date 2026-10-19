@@ -1,5 +1,7 @@
 """Equality constraints satisfied by construction, in the manner of DC3."""
 
+from collections.abc import Callable
+
 import equinox as eqx
 import jax
 import jax.numpy as jnp
@@ -72,7 +74,7 @@ def _circle(x: jax.Array, y: jax.Array) -> jax.Array:
     ids=["affine", "nonlinear"],
 )
 def test_the_completed_jacobian_matches_finite_differences(
-    target: object, constraint: sx.Constraint
+    target: Callable[[jax.Array], jax.Array], constraint: sx.Constraint
 ) -> None:
     domain = sx.box([0.5, 0.3], [2.0, 1.2])
     completed = sx.fit_constrained(

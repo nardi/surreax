@@ -41,7 +41,7 @@ def test_integer_samples_every_value_evenly() -> None:
     flat = np.asarray(sample(region, 400, seed=0))[:, 0]
     values, counts = np.unique(flat, return_counts=True)
     assert values.tolist() == [1.0, 2.0, 3.0, 4.0]
-    assert counts.min() >= 80
+    assert np.min(counts) >= 80
     assert jnp.array_equal(region.project(jnp.array([2.6])), jnp.array([3.0]))
     assert jnp.array_equal(region.project(jnp.array([9.0])), jnp.array([4.0]))
 

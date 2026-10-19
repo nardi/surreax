@@ -1,5 +1,7 @@
 """Tests for hyper-reduction, the reduced solve that reads only a few entries."""
 
+from collections.abc import Callable
+
 import equinox as eqx
 import jax
 import jax.numpy as jnp
@@ -11,7 +13,9 @@ from tests import implicit_systems
 
 
 def _relative(
-    system: implicit_systems.ImplicitSystem, solver: eqx.Module, points: jax.Array
+    system: implicit_systems.ImplicitSystem,
+    solver: Callable[[jax.Array], jax.Array],
+    points: jax.Array,
 ) -> float:
     """Mean residual a solver leaves, over the mean residual at zero."""
     unknown = system.unknown_domain.dimension

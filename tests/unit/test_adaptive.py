@@ -2,6 +2,7 @@
 
 import jax
 import jax.numpy as jnp
+import pytest
 
 import surreax as sx
 from surreax.error_search import high_error_points
@@ -11,6 +12,7 @@ def _bump(x: jax.Array) -> jax.Array:
     return (jnp.exp(-8 * (x[0] ** 2 + x[1] ** 2)))[None]
 
 
+@pytest.mark.slow
 def test_adaptive_beats_a_fixed_sample_of_the_same_size() -> None:
     domain = sx.box([-1.0, -1.0], [1.0, 1.0])
     form = sx.ChebyshevPolynomial(degree=6)
@@ -70,6 +72,7 @@ def test_warm_start_reuses_a_network_across_a_refit() -> None:
     assert jnp.isfinite(warm.report.value_mean)
 
 
+@pytest.mark.slow
 def test_adaptive_reuses_the_previous_fit_for_an_iterative_form() -> None:
     domain = sx.box([-1.0, -1.0], [1.0, 1.0])
     form = sx.DifferenceOfMaxAffineForm(pieces=2, restarts=3, steps=200)

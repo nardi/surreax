@@ -36,6 +36,7 @@ def _held_out() -> jax.Array:
     return _DOMAIN.sample_unit(unit)
 
 
+@pytest.mark.slow
 def test_a_balance_holds_exactly_while_the_free_outputs_stay_put() -> None:
     constraint = sx.Constraint(_balance, dependent=(2,))
     form = sx.ChebyshevPolynomial(degree=3)
@@ -61,6 +62,7 @@ def _circle(x: jax.Array, y: jax.Array) -> jax.Array:
     return (y[0] ** 2 + y[1] ** 2 - 1.0 - x[0] ** 2)[None]
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize(
     ("target", "constraint"),
     [(_balanced, sx.Constraint(_balance, dependent=(2,))),
@@ -85,6 +87,7 @@ def test_the_completed_jacobian_matches_finite_differences(
     assert float(jnp.abs(constraint.function(point, completed(point))[0])) < 1e-4
 
 
+@pytest.mark.slow
 def test_a_dependent_choice_the_constraint_does_not_fix_is_rejected() -> None:
     def partial_balance(x: jax.Array, y: jax.Array) -> jax.Array:
         return (y[0] + y[1] - x[0])[None]
@@ -97,6 +100,7 @@ def test_a_dependent_choice_the_constraint_does_not_fix_is_rejected() -> None:
         sx.fit_constrained(_balanced, _DOMAIN, sx.Constraint(_balance, dependent=(1, 1)))
 
 
+@pytest.mark.slow
 def test_an_implicit_fit_satisfies_its_first_equation_exactly() -> None:
     def residual(x: jax.Array, y: jax.Array) -> jax.Array:
         return jnp.stack([y[0] + y[1] - x[0], y[0] - y[1] ** 3 - x[1]])
@@ -118,6 +122,7 @@ def test_an_implicit_fit_satisfies_its_first_equation_exactly() -> None:
     assert float(surrogate.report.value_mean) < 2.0 * float(plain.report.value_mean)
 
 
+@pytest.mark.slow
 def test_a_given_step_count_overrides_the_detected_one() -> None:
     domain = sx.box([0.5, 0.3], [2.0, 1.2])
     constraint = sx.Constraint(_circle, dependent=(1,), steps=4)

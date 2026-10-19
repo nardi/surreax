@@ -62,6 +62,9 @@ and jaxtyping with beartype checks array shapes at runtime during tests.
   the markers `unit`, `integration` and `benchmark`, so `pytest -m unit` and
   `pytest tests/unit` select the same tests. The shared test systems stay in
   `tests/`.
+- A test that takes about ten seconds or more carries the `slow` marker. The
+  command `pytest tests/unit -m "not slow"` is the quick check, and it skips
+  the 50 slowest unit tests.
 - The benchmarks build and fit their systems before they time anything, so the
   directory takes several minutes. `pytest -m "not benchmark"` skips it.
 - Every code example on this site is executed by markdown-pytest in CI, so an

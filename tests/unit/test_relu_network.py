@@ -40,6 +40,7 @@ def _fit(
     )
 
 
+@pytest.mark.slow
 def test_a_convex_network_is_convex_with_nonnegative_hidden_weights() -> None:
     surrogate = _fit(sx.ConvexNetworkForm(width=8, depth=3, steps=300), _convex)
     model = surrogate.model
@@ -53,6 +54,7 @@ def test_a_convex_network_is_convex_with_nonnegative_hidden_weights() -> None:
     assert float(jnp.max(middle - chord)) < 1e-4
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize("depth", [1, 2, 3])
 def test_a_convex_network_of_any_depth_fits_a_convex_target(depth: int) -> None:
     surrogate = _fit(sx.ConvexNetworkForm(width=12, depth=depth, steps=1500), _convex)
@@ -60,6 +62,7 @@ def test_a_convex_network_of_any_depth_fits_a_convex_target(depth: int) -> None:
     assert float(surrogate.report.value_mean) < 0.08
 
 
+@pytest.mark.slow
 def test_a_relu_network_fits_a_nonconvex_piecewise_linear_target() -> None:
     surrogate = _fit(sx.ReluNetworkForm(width=16, depth=2, steps=2000), _nonconvex)
     assert float(surrogate.report.value_mean) < 0.05
@@ -68,6 +71,7 @@ def test_a_relu_network_fits_a_nonconvex_piecewise_linear_target() -> None:
     assert float(jnp.max(jnp.abs(jax.hessian(surrogate)(point)))) < 1e-5
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize(
     "form", [sx.ConvexNetworkForm(width=8, steps=200), sx.ReluNetworkForm(width=8, steps=200)]
 )
@@ -80,6 +84,7 @@ def test_the_networks_survive_jit_vmap_and_grad(
     assert jax.grad(lambda x: surrogate(x)[0])(batch[0]).shape == (2,)
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize(
     "form",
     [sx.ConvexNetworkForm(width=8, steps=600), sx.ReluNetworkForm(width=8, steps=600)],
@@ -94,6 +99,7 @@ def test_derivative_supervision_and_warm_starts_reach_the_networks(
     assert float(again.report.value_mean) <= 1.5 * float(first.report.value_mean) + 1e-3
 
 
+@pytest.mark.slow
 def test_the_convex_export_reproduces_the_surrogate_in_original_coordinates() -> None:
     surrogate = _fit(sx.ConvexNetworkForm(width=8, depth=2, steps=500), _convex)
     export = sx.export(surrogate)
@@ -123,6 +129,7 @@ def test_the_convex_export_reproduces_the_surrogate_in_original_coordinates() ->
         sx.export(flipped)
 
 
+@pytest.mark.slow
 def test_the_relu_export_reproduces_the_surrogate_in_original_coordinates() -> None:
     surrogate = _fit(sx.ReluNetworkForm(width=8, depth=2, steps=500), _nonconvex)
     export = sx.export(surrogate)

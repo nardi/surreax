@@ -44,6 +44,7 @@ def test_gradient_fit_also_recovers_the_target() -> None:
     assert float(surrogate.report.value_mean) < 1e-2
 
 
+@pytest.mark.slow
 def test_fitted_max_affine_is_convex() -> None:
     domain = sx.box([-1.0, -1.0], [1.0, 1.0])
     form = sx.MaxAffineForm(pieces=4, restarts=4, iterations=20)

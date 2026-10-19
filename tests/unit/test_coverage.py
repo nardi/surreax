@@ -3,6 +3,7 @@
 import equinox as eqx
 import jax
 import jax.numpy as jnp
+import pytest
 
 import surreax as sx
 
@@ -43,6 +44,7 @@ def test_a_box_covers_its_inside_and_grows_outside() -> None:
     assert float(sx.coverage(region, jnp.array([1.5, 1.0]))) == 1.5
 
 
+@pytest.mark.slow
 def test_a_fit_reports_coverage_and_the_surrogate_reads_it() -> None:
     data = _diagonal()
 

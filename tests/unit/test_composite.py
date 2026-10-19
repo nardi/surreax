@@ -2,6 +2,7 @@
 
 import jax
 import jax.numpy as jnp
+import pytest
 
 import surreax as sx
 
@@ -11,6 +12,7 @@ def _separable(x: jax.Array) -> jax.Array:
     return jnp.array([jnp.sin(x[0]) * x[1], 2 * x[2], x[3] ** 2 - x[4]])
 
 
+@pytest.mark.slow
 def test_composite_matches_the_target_on_a_separable_function() -> None:
     domain = sx.box([-1.0] * 5, [1.0] * 5)
     surrogate = sx.fit_separable(_separable, domain, sx.ChebyshevPolynomial(degree=3), samples=256)
@@ -22,6 +24,7 @@ def test_composite_matches_the_target_on_a_separable_function() -> None:
     assert float(surrogate.report.projection_max) < 1e-5
 
 
+@pytest.mark.slow
 def test_per_block_forms_fit_a_linear_block_exactly() -> None:
     def target(x: jax.Array) -> jax.Array:
         return jnp.array([2 * x[0] - 1.0, jnp.sin(3 * x[1])])
@@ -35,6 +38,7 @@ def test_per_block_forms_fit_a_linear_block_exactly() -> None:
     assert jnp.allclose(surrogate(point), target(point), atol=1e-2)
 
 
+@pytest.mark.slow
 def test_composite_survives_jit_vmap_and_grad() -> None:
     domain = sx.box([-1.0] * 5, [1.0] * 5)
     surrogate = sx.fit_separable(_separable, domain, sx.ChebyshevPolynomial(degree=3), samples=256)

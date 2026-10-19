@@ -26,6 +26,7 @@ def test_max_affine_export_matches_the_surrogate_in_original_coordinates() -> No
     assert jnp.allclose(by_hand, jax.vmap(surrogate)(points), atol=1e-4)
 
 
+@pytest.mark.slow
 def test_difference_export_matches_the_surrogate() -> None:
     def wave(x: jax.Array) -> jax.Array:
         return (jnp.maximum(2 * x[0] - x[1], x[0] + 2 * x[1]) - jnp.maximum(-x[0], x[1]))[None]

@@ -14,6 +14,7 @@ from surreax.implicit import (
 )
 
 
+@pytest.mark.slow
 def test_affine_in_the_unknown_is_recovered_exactly() -> None:
     # g(x, y) = y - 2x, so f(x) = 2x, and the inverse map is exactly affine.
     def residual(x: jax.Array, y: jax.Array) -> jax.Array:
@@ -45,6 +46,7 @@ def _cubic(x: jax.Array, y: jax.Array) -> jax.Array:
     return y**3 + y - x
 
 
+@pytest.mark.slow
 def test_newton_steps_lower_the_residual() -> None:
     domain = sx.box([-2.0], [2.0])
     form = sx.ChebyshevPolynomial(degree=4)
@@ -60,6 +62,7 @@ def test_newton_steps_lower_the_residual() -> None:
     assert float(with_steps.report.value_mean) < float(without.report.value_mean)
 
 
+@pytest.mark.slow
 def test_nonlinear_monotone_reaches_a_low_residual() -> None:
     domain = sx.box([-2.0], [2.0])
     form = sx.ChebyshevPolynomial(degree=4)
@@ -68,6 +71,7 @@ def test_nonlinear_monotone_reaches_a_low_residual() -> None:
     assert float(surrogate.report.value_mean) < 0.5
 
 
+@pytest.mark.slow
 def test_iterative_refinement_drives_the_residual_down() -> None:
     domain = sx.box([-2.0], [2.0])
     form = sx.ChebyshevPolynomial(degree=4)
@@ -91,6 +95,7 @@ def _square(x: jax.Array, y: jax.Array) -> jax.Array:
     return y**2 - x
 
 
+@pytest.mark.slow
 def test_two_branch_residual_stays_on_one_branch() -> None:
     domain = sx.box([0.25], [1.0])
     # Symmetric starts land on both branches, so a naive fit would average them.
@@ -105,6 +110,7 @@ def test_two_branch_residual_stays_on_one_branch() -> None:
     assert float(surrogate.fold.off_branch) > 0.3
 
 
+@pytest.mark.slow
 def test_fold_is_flagged_where_the_jacobian_turns_singular() -> None:
     quartic = sx.ChebyshevPolynomial(degree=4)
     folding = sx.InverseMap(
@@ -124,6 +130,7 @@ def test_fold_is_flagged_where_the_jacobian_turns_singular() -> None:
     assert float(monotone_fit.fold.min_determinant) > float(fold_fit.fold.min_determinant)
 
 
+@pytest.mark.slow
 def test_continuation_follows_one_branch() -> None:
     method = sx.InverseMap(
         unknown_domain=sx.box([0.05], [1.1]), newton_steps=6, continuation=True
@@ -176,6 +183,7 @@ def _diffusion(x: jax.Array, y: jax.Array) -> jax.Array:
     return -laplacian + 0.5 * y - x @ _SHAPES
 
 
+@pytest.mark.slow
 def test_exact_solve_fits_a_large_sparse_system() -> None:
     domain = sx.box([-1.0, -1.0, -1.0], [1.0, 1.0, 1.0])
     method = sx.ExactSolve(
@@ -221,6 +229,7 @@ def _linear_diffusion(x: jax.Array, y: jax.Array) -> jax.Array:
     return -laplacian + 0.5 * y - x @ _SHAPES
 
 
+@pytest.mark.slow
 def test_reduced_order_fits_from_few_snapshots() -> None:
     domain = sx.box([-1.0, -1.0, -1.0], [1.0, 1.0, 1.0])
     # Only 16 full solves build the basis, then every sample is reduce-solved.
@@ -236,6 +245,7 @@ def test_reduced_order_fits_from_few_snapshots() -> None:
     assert float(surrogate.report.value_mean) < 1e-3
 
 
+@pytest.mark.slow
 def test_reduced_order_latent_dimension_tracks_the_manifold() -> None:
     domain = sx.box([-1.0, -1.0, -1.0], [1.0, 1.0, 1.0])
     unknown_domain = sx.box([-3.0] * 64, [3.0] * 64)
@@ -299,6 +309,7 @@ def _rom_method(**overrides: object) -> sx.ReducedSolve:
     return sx.ReducedSolve(**settings)  # type: ignore[arg-type]
 
 
+@pytest.mark.slow
 def test_reduced_solver_derivative_matches_the_reference() -> None:
     solver = sx.reduced_solver(_rom_linear, _ROM_XDOMAIN, _rom_method(), samples=64)
     point = jnp.array([0.5, -0.3, 0.7, 0.1])
@@ -351,6 +362,7 @@ def _rom_localized(x: jax.Array, y: jax.Array) -> jax.Array:
     return -laplacian + 0.5 * y + 0.5 * y**3 - x @ _ROM_LOCAL_MODES
 
 
+@pytest.mark.slow
 def test_greedy_snapshots_beat_fixed_on_worst_case() -> None:
     test_points = jax.random.uniform(jax.random.key(9), (40, 4), minval=-1.0, maxval=1.0)
 
@@ -368,6 +380,7 @@ def test_greedy_snapshots_beat_fixed_on_worst_case() -> None:
     assert worst_residual(greedy) < worst_residual(fixed) * 0.7
 
 
+@pytest.mark.slow
 def test_greedy_stops_at_the_snapshot_tolerance() -> None:
     # A tolerance above every candidate residual stops after the first snapshot.
     solver = sx.reduced_solver(
@@ -379,6 +392,7 @@ def test_greedy_stops_at_the_snapshot_tolerance() -> None:
     assert solver.basis.shape[0] == 1
 
 
+@pytest.mark.slow
 def test_derivative_supervision_lowers_the_jacobian_error() -> None:
     solver = sx.reduced_solver(_rom_cubic, _ROM_XDOMAIN, _rom_method(), samples=64)
     points = jax.random.uniform(jax.random.key(3), (15, 4), minval=-1.0, maxval=1.0)
@@ -453,6 +467,7 @@ def test_the_recommended_form_follows_the_residual_and_the_method() -> None:
     assert sx.recommend_implicit_form(_cubic, domain, objective) is form
 
 
+@pytest.mark.slow
 def test_fit_implicit_recommends_a_form_when_none_is_given() -> None:
     def residual(x: jax.Array, y: jax.Array) -> jax.Array:
         return y - 2.0 * x

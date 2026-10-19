@@ -2,10 +2,12 @@
 
 import jax
 import jax.numpy as jnp
+import pytest
 
 import surreax as sx
 
 
+@pytest.mark.slow
 def test_a_separable_fit_finds_its_worst_block() -> None:
     def target(x: jax.Array) -> jax.Array:
         # A narrow bump at 0.6 in the first block, which a quadratic misses.

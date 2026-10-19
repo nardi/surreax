@@ -90,6 +90,7 @@ def test_a_cubic_target_is_fitted_exactly_without_a_degree() -> None:
     assert float(surrogate.report.value_max) < 1e-4
 
 
+@pytest.mark.slow
 def test_a_smooth_non_polynomial_target_gets_a_searched_degree() -> None:
     def target(x: jax.Array) -> jax.Array:
         return jnp.exp(x[0]) * jnp.cos(x[1])[None]
@@ -102,6 +103,7 @@ def test_a_smooth_non_polynomial_target_gets_a_searched_degree() -> None:
     assert strict.form == sx.ChebyshevPolynomial(degree=2)
 
 
+@pytest.mark.slow
 def test_few_directions_and_correlated_outputs_get_reductions() -> None:
     direction = jnp.linspace(0.1, 1.0, 10)
     other = jnp.cos(jnp.arange(10.0))
@@ -119,6 +121,7 @@ def test_few_directions_and_correlated_outputs_get_reductions() -> None:
     assert surrogate.output_reduction.encode_matrix.shape[0] <= 3
 
 
+@pytest.mark.slow
 def test_a_large_basis_gets_a_sparse_budget() -> None:
     # Every input matters about equally, so no input reduction applies, and the
     # degree-three basis over twelve inputs outgrows the samples.

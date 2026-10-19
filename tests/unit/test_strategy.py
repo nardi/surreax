@@ -53,6 +53,7 @@ def test_recommend_form_falls_back_to_a_network_for_mixed_kinds() -> None:
     assert isinstance(sx.recommend_form(smooth_and_kinked, _DOMAIN), sx.NetworkForm)
 
 
+@pytest.mark.slow
 def test_auto_fit_recovers_a_polynomial_without_a_form() -> None:
     surrogate = sx.fit(_polynomial, _DOMAIN, samples=256)
     assert float(surrogate.report.value_max) < 1e-3
@@ -68,6 +69,7 @@ def test_recommend_block_forms_picks_a_form_per_block() -> None:
     assert isinstance(forms[1], sx.ChebyshevPolynomial)
 
 
+@pytest.mark.slow
 def test_auto_separable_fits_a_linear_and_a_nonlinear_block() -> None:
     def separable(x: jax.Array) -> jax.Array:
         return jnp.array([3 * x[0] + 1.0, x[1] ** 2])

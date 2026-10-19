@@ -2,6 +2,7 @@
 
 import jax
 import jax.numpy as jnp
+import pytest
 
 import surreax as sx
 from surreax.forms.difference_max_affine import DifferenceOfMaxAffine
@@ -32,6 +33,7 @@ def test_difference_recovers_a_nonconvex_piecewise_linear_target() -> None:
     assert surrogate.report.structure_cost == 4
 
 
+@pytest.mark.slow
 def test_difference_beats_a_single_max_affine_on_a_nonconvex_target() -> None:
     domain = sx.box([-1.0, -1.0], [1.0, 1.0])
     difference = sx.fit(
@@ -54,6 +56,7 @@ def test_difference_beats_a_single_max_affine_on_a_nonconvex_target() -> None:
     assert float(difference.report.value_mean) < float(convex.report.value_mean)
 
 
+@pytest.mark.slow
 def test_difference_surrogate_survives_jit_and_grad() -> None:
     domain = sx.box([-1.0, -1.0], [1.0, 1.0])
     form = sx.DifferenceOfMaxAffineForm(pieces=2, restarts=4, steps=300)

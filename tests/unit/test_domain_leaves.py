@@ -114,6 +114,7 @@ def _mixed_target(inputs: dict[str, jax.Array]) -> jax.Array:
     return jnp.stack([material * x[0] + count, x[0] * x[1] + count * material])
 
 
+@pytest.mark.slow
 def test_a_mixed_domain_fits_and_reports_a_valid_worst_case() -> None:
     domain = _mixed_domain()
     surrogate = sx.fit(
@@ -131,6 +132,7 @@ def test_a_mixed_domain_fits_and_reports_a_valid_worst_case() -> None:
     assert jnp.allclose(jacobian["x"], jax.jacobian(_mixed_target)(value)["x"], atol=1e-2)
 
 
+@pytest.mark.slow
 def test_a_mixed_domain_supports_derivatives_and_reductions() -> None:
     domain = _mixed_domain()
     sobolev = sx.fit(

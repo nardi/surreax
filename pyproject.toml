@@ -55,6 +55,7 @@ testpaths = ["tests", "docs", "README.md"]
 addopts = "--strict-markers"
 markers = [
     "unit: one module on small inputs",
+    "slow: a test that takes about ten seconds or more",
     "integration: several modules together, or a whole fit on a test system",
     "benchmark: timings of the hot paths",
 ]

@@ -18,7 +18,6 @@ def _linear_solver(
     }
     options.update(settings)
     method = sx.ReducedSolve(
-        form=sx.Affine(),
         unknown_domain=system.unknown_domain,
         rank=rank,
         **options,  # type: ignore[arg-type]

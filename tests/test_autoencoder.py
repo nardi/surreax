@@ -37,7 +37,6 @@ def _relative_residual(surrogate: eqx.Module) -> float:
 
 def _method(**overrides: object) -> sx.AutoencoderSolve:
     settings: dict[str, object] = {
-        "form": sx.ChebyshevPolynomial(degree=3),
         "unknown_dimension": 32,
         "rank": 4,
         "steps": 800,
@@ -90,7 +89,8 @@ def test_latent_derivative_matches_finite_differences(solver: sx.AutoencoderSolv
 
 
 def test_fit_implicit_distills_a_decoded_surrogate() -> None:
-    surrogate = sx.fit_implicit(_radiating_rod, _DOMAIN, _method(), samples=256)
+    form = sx.ChebyshevPolynomial(degree=3)
+    surrogate = sx.fit_implicit(_radiating_rod, _DOMAIN, _method(), form, samples=256)
     assert isinstance(surrogate, sx.DecodedSurrogate)
     assert _relative_residual(surrogate) < 0.15
 
@@ -116,7 +116,6 @@ def test_learned_manifold_beats_a_linear_basis_on_a_moving_front() -> None:
         pipe.residual,
         pipe.domain,
         sx.ReducedSolve(
-            form=sx.Affine(),
             unknown_domain=pipe.unknown_domain,
             rank=8,
             snapshots=64,
@@ -129,7 +128,6 @@ def test_learned_manifold_beats_a_linear_basis_on_a_moving_front() -> None:
         pipe.residual,
         pipe.domain,
         sx.AutoencoderSolve(
-            form=sx.Affine(),
             unknown_dimension=64,
             rank=2,
             width=64,
@@ -148,7 +146,6 @@ def test_recommender_routes_by_the_linear_energy() -> None:
 
     def request(system: implicit_systems.ImplicitSystem, rank: int) -> sx.ReducedSolve:
         return sx.ReducedSolve(
-            form=sx.Affine(),
             unknown_domain=system.unknown_domain,
             rank=rank,
             snapshots=32,

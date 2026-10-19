@@ -276,7 +276,6 @@ class InverseMap(eqx.Module):
     solve from the previous solution, which follows one branch through a fold.
     """
 
-    form: LinearForm
     unknown_domain: Domain
     newton_steps: int = eqx.field(static=True, default=1)
     continuation: bool = eqx.field(static=True, default=False)
@@ -366,7 +365,6 @@ class ExactSolve(eqx.Module):
     skips the check.
     """
 
-    form: LinearForm
     unknown_domain: Domain
     rank: int | None = eqx.field(static=True, default=None)
     variance: float = eqx.field(static=True, default=0.99)
@@ -415,6 +413,7 @@ def _fit_exact_solve(
     residual: Residual,
     inputs: Float[Array, "n d"],
     method: ExactSolve,
+    form: LinearForm,
     holdout: float,
     ridge: float,
 ) -> FittedSurrogate:
@@ -429,7 +428,7 @@ def _fit_exact_solve(
         return fit_data(
             inputs,
             unknowns,
-            method.form,
+            form,
             holdout=holdout,
             ridge=ridge,
             reduce_outputs=reduce_outputs,
@@ -443,7 +442,7 @@ def _fit_exact_solve(
     return fit_data(
         inputs,
         unknowns,
-        method.form,
+        form,
         holdout=holdout,
         ridge=ridge,
         reduce_outputs=lambda outputs: projection,
@@ -531,8 +530,6 @@ class ReducedSolve(eqx.Module):
 
     unknown_domain: Domain
     rank: int = eqx.field(static=True)
-    form: LinearForm | None = None
-    """Form of the input-to-latent map that `fit_implicit` fits, not used by the solver."""
     snapshots: int = eqx.field(static=True, default=64)
     newton_steps: int = eqx.field(static=True, default=8)
     reduced_steps: int = eqx.field(static=True, default=8)
@@ -814,11 +811,11 @@ def _fit_reduced_order(
     residual: Residual,
     inputs: Float[Array, "n d"],
     method: ReducedSolve,
+    form: LinearForm,
     holdout: float,
     ridge: float,
 ) -> FittedSurrogate:
     """Build the reduced solver, reduce-solve every sample, and distill."""
-    form = _latent_form(method)
     solver = _build_reduced_solver(residual, inputs[: method.snapshots], method)
     latents = jax.vmap(solver.latent)(inputs)
     projection = reduction.LinearReduction(
@@ -904,6 +901,7 @@ def _fit_inverse_map(
     residual: Residual,
     inputs: Float[Array, "n d"],
     method: InverseMap,
+    form: LinearForm,
     holdout: float,
     ridge: float,
 ) -> ImplicitSurrogate:
@@ -934,9 +932,7 @@ def _fit_inverse_map(
     on_branch_inputs, on_branch_unknowns = inputs[kept], unknowns[kept]
     residuals = jax.vmap(residual)(on_branch_inputs, on_branch_unknowns)
     augmented = jnp.concatenate([on_branch_inputs, residuals], axis=1)
-    inverse_map = fit_data(
-        augmented, on_branch_unknowns, method.form, holdout=holdout, ridge=ridge
-    )
+    inverse_map = fit_data(augmented, on_branch_unknowns, form, holdout=holdout, ridge=ridge)
     return ImplicitSurrogate(
         inverse_map=inverse_map,
         residual_dimension=residuals.shape[1],
@@ -1024,27 +1020,17 @@ def autoencoder_solver(
     )
 
 
-def _latent_form(method: ReducedSolve | AutoencoderSolve) -> LinearForm:
-    """The form of the latent map, which a fit needs and a solver on its own does not."""
-    if method.form is None:
-        raise ValueError(
-            f"{type(method).__name__} needs a form to fit a surrogate. Pass one as `form`, "
-            "or build the solver on its own."
-        )
-    return method.form
-
-
 def _fit_autoencoder(
     residual: Residual,
     domain: Domain,
     inputs: Float[Array, "n d"],
     method: AutoencoderSolve,
+    form: LinearForm,
     holdout: float,
     ridge: float,
     seed: int,
 ) -> DecodedSurrogate:
     """Train the solver, reduce-solve every sample, and distill the latent map."""
-    form = _latent_form(method)
     solver = autoencoder_solver(residual, domain, method, seed=seed)
     latents = jax.vmap(solver.latent)(inputs)
     latent_map = fit_data(inputs, latents, form, holdout=holdout, ridge=ridge)
@@ -1073,7 +1059,6 @@ def recommend_reduced_method(
     if strategy.linear_energy(states, method.rank) >= 1.0 - tolerance:
         return method
     return AutoencoderSolve(
-        form=method.form,
         unknown_dimension=method.unknown_domain.dimension,
         rank=method.rank,
         snapshots=method.snapshots,
@@ -1129,14 +1114,11 @@ def recommend_method(
         residual, domain, unknown_domain, samples=samples, seed=seed
     )
     if unknown_domain.dimension > _SMALL_UNKNOWN:
-        form: LinearForm = Affine() if affine else ChebyshevPolynomial(degree=2)
         linear_solver = recommend_linear_solver(residual, domain, unknown_domain, seed=seed)
-        return ExactSolve(form=form, unknown_domain=unknown_domain, linear_solver=linear_solver)
+        return ExactSolve(unknown_domain=unknown_domain, linear_solver=linear_solver)
     if affine:
-        return InverseMap(form=Affine(), unknown_domain=unknown_domain, newton_steps=1)
-    return InverseMap(
-        form=ChebyshevPolynomial(degree=3), unknown_domain=unknown_domain, newton_steps=3
-    )
+        return InverseMap(unknown_domain=unknown_domain, newton_steps=1)
+    return InverseMap(unknown_domain=unknown_domain, newton_steps=3)
 
 
 BaseMethod = InverseMap | Objective | ExactSolve | ReducedSolve | AutoencoderSolve
@@ -1160,11 +1142,58 @@ BaseSurrogate = ImplicitSurrogate | FittedSurrogate | DecodedSurrogate | Complet
 """What a method returns before any refinement."""
 
 
+def recommend_implicit_form(
+    residual: Residual,
+    domain: Domain,
+    method: BaseMethod | Completed,
+    *,
+    samples: int = 128,
+    seed: int = 0,
+) -> LinearForm:
+    """Pick the form that maps the input to the unknowns or their latent.
+
+    A residual that is affine in the unknown gives an `Affine` map. Any other
+    residual takes a `ChebyshevPolynomial`, of degree 3 for an `InverseMap` and
+    of degree 2 for the reduced methods. An `AutoencoderSolve` has learned latent
+    coordinates with no structure to read from the residual, so it takes degree 3.
+    An `Objective` is its own form.
+    """
+    if isinstance(method, Completed):
+        return recommend_implicit_form(residual, domain, method.method, samples=samples, seed=seed)
+    if isinstance(method, Objective):
+        return method.form
+    if isinstance(method, AutoencoderSolve):
+        return ChebyshevPolynomial(degree=3)
+    affine = strategy.residual_is_affine_in_unknown(
+        residual, domain, method.unknown_domain, samples=samples, seed=seed
+    )
+    if affine:
+        return Affine()
+    return ChebyshevPolynomial(degree=3 if isinstance(method, InverseMap) else 2)
+
+
+def _resolve_form(
+    residual: Residual,
+    domain: Domain,
+    method: BaseMethod | Completed,
+    form: LinearForm | None,
+    seed: int,
+) -> LinearForm:
+    """Return `form`, or a recommended one when it is None."""
+    inner = method.method if isinstance(method, Completed) else method
+    if isinstance(inner, Objective) and form is not None:
+        raise ValueError("An `Objective` is its own form, so it takes no `form` here.")
+    if form is None:
+        return recommend_implicit_form(residual, domain, method, seed=seed)
+    return form
+
+
 def _fit_method(
     residual: Residual,
     domain: Domain,
     train_inputs: Float[Array, "n d"],
     method: BaseMethod | Completed,
+    form: LinearForm,
     holdout: float,
     ridge: float,
     seed: int,
@@ -1172,18 +1201,20 @@ def _fit_method(
     """Fit a surrogate through one method on the training inputs."""
     match method:
         case InverseMap():
-            return _fit_inverse_map(residual, train_inputs, method, holdout, ridge)
+            return _fit_inverse_map(residual, train_inputs, method, form, holdout, ridge)
         case Objective():
             return _fit_objective(residual, domain, train_inputs, method)
         case ExactSolve():
-            return _fit_exact_solve(residual, train_inputs, method, holdout, ridge)
+            return _fit_exact_solve(residual, train_inputs, method, form, holdout, ridge)
         case ReducedSolve():
-            return _fit_reduced_order(residual, train_inputs, method, holdout, ridge)
+            return _fit_reduced_order(residual, train_inputs, method, form, holdout, ridge)
         case AutoencoderSolve():
-            return _fit_autoencoder(residual, domain, train_inputs, method, holdout, ridge, seed)
+            return _fit_autoencoder(
+                residual, domain, train_inputs, method, form, holdout, ridge, seed
+            )
         case Completed():
             inner = _fit_method(
-                residual, domain, train_inputs, method.method, holdout, ridge, seed
+                residual, domain, train_inputs, method.method, form, holdout, ridge, seed
             )
             return complete(inner, method.constraint, train_inputs, inner.report)
         case _:
@@ -1194,6 +1225,7 @@ def fit_implicit(
     residual: Residual,
     domain: Domain,
     method: BaseMethod | Completed | None = None,
+    form: LinearForm | None = None,
     *,
     unknown_domain: Domain | None = None,
     samples: int = 512,
@@ -1209,9 +1241,13 @@ def fit_implicit(
     reports the residual the surrogate leaves on held-out inputs. A positive
     `refine_steps` polishes each prediction with Newton steps on the residual at
     call time, which every method's result can use. Leaving `method` out picks
-    one from the residual's structure, which needs `unknown_domain`. The residual
-    takes the input as a flat array, so the domain must be a `Box`. `sampler`
-    picks the sequence the samples follow.
+    one from the residual's structure, which needs `unknown_domain`.
+
+    The `form` fits the map from the input to the solved unknowns, or to their
+    latent. Leaving it out picks one, see `recommend_implicit_form`. An
+    `Objective` is its own form and refuses a `form` here. The residual takes
+    the input as a flat array, so the domain must be a `Box`. `sampler` picks
+    the sequence the samples follow.
     """
     if not isinstance(domain, Box):
         raise TypeError("fit_implicit needs a Box domain")
@@ -1224,7 +1260,8 @@ def fit_implicit(
     holdout_count = max(1, round(samples * holdout))
     train_inputs, holdout_inputs = inputs[:-holdout_count], inputs[-holdout_count:]
 
-    base = _fit_method(residual, domain, train_inputs, method, holdout, ridge, seed)
+    form = _resolve_form(residual, domain, method, form, seed)
+    base = _fit_method(residual, domain, train_inputs, method, form, holdout, ridge, seed)
     surrogate: BaseSurrogate | RefinedSurrogate = base
     if refine_steps > 0:
         surrogate = refine(base, residual, steps=refine_steps)

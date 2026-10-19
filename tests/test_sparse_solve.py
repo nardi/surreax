@@ -188,13 +188,14 @@ def test_exact_solve_derivative_supervision_lowers_the_jacobian_error() -> None:
 
     def fitted(weight: float) -> sx.FittedSurrogate:
         method = sx.ExactSolve(
-            form=sx.ChebyshevPolynomial(degree=2),
             unknown_domain=system.unknown_domain,
             rank=4,
             newton_steps=10,
             derivative_weight=weight,
         )
-        surrogate = sx.fit_implicit(system.residual, system.domain, method, samples=48)
+        surrogate = sx.fit_implicit(
+            system.residual, system.domain, method, sx.ChebyshevPolynomial(degree=2), samples=48
+        )
         assert isinstance(surrogate, sx.FittedSurrogate)
         return surrogate
 

@@ -105,12 +105,11 @@ def test_an_implicit_fit_satisfies_its_first_equation_exactly() -> None:
         return residual(x, y)[:1]
 
     domain = sx.box([0.0, -0.5], [1.0, 0.5])
-    inner = sx.InverseMap(
-        form=sx.ChebyshevPolynomial(degree=3), unknown_domain=sx.box([-2.0, -2.0], [2.0, 2.0])
-    )
+    inner = sx.InverseMap(unknown_domain=sx.box([-2.0, -2.0], [2.0, 2.0]))
+    form = sx.ChebyshevPolynomial(degree=3)
     method = sx.Completed(method=inner, constraint=sx.Constraint(first_equation, dependent=(0,)))
-    surrogate = sx.fit_implicit(residual, domain, method, samples=256)
-    plain = sx.fit_implicit(residual, domain, inner, samples=256)
+    surrogate = sx.fit_implicit(residual, domain, method, form, samples=256)
+    plain = sx.fit_implicit(residual, domain, inner, form, samples=256)
     assert isinstance(surrogate, sx.CompletedSurrogate)
     points = domain.sample_unit(jax.random.uniform(jax.random.key(5), (32, 2)))
     left = sx.constraint_residuals(surrogate, method.constraint, points)

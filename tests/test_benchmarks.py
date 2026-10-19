@@ -78,7 +78,6 @@ def test_benchmark_worst_case_search(benchmark, surrogate: sx.FittedSurrogate) -
 
 def _reduced_solve_method() -> sx.ReducedSolve:
     return sx.ReducedSolve(
-        form=sx.Affine(),
         unknown_domain=systems.large_sparse_unknown_domain(),
         rank=systems.LARGE_INPUTS,
         snapshots=16,
@@ -95,7 +94,7 @@ def test_benchmark_large_reduced_solve_fit(benchmark) -> None:
 
     def build() -> sx.FittedSurrogate:
         surrogate = sx.fit_implicit(
-            systems.large_sparse_residual, domain, method, samples=64
+            systems.large_sparse_residual, domain, method, sx.Affine(), samples=64
         )
         return jax.block_until_ready(surrogate(jnp.zeros(systems.LARGE_INPUTS)))
 
@@ -108,6 +107,7 @@ def test_benchmark_large_field_call(benchmark) -> None:
         systems.large_sparse_residual,
         systems.large_sparse_domain(),
         _reduced_solve_method(),
+        sx.Affine(),
         samples=64,
     )
     call = eqx.filter_jit(surrogate)
@@ -120,7 +120,6 @@ def _hot_spot_solvers(points: int) -> tuple[sx.ReducedSolver, sx.HyperReducedSol
     """The linear reduced solver of the rod with hot spots, and its hyper-reduction."""
     rod = implicit_systems.rod_with_hot_spots(points)
     method = sx.ReducedSolve(
-        form=sx.Affine(),
         unknown_domain=rod.unknown_domain,
         rank=6,
         snapshots=32,
@@ -207,7 +206,6 @@ def test_benchmark_reduced_solve_against_latent_dimension(benchmark, rank: int) 
     # Each reduced Newton step is an r-by-r solve, so the cost follows the rank.
     rod = implicit_systems.radiating_rod(4096)
     method = sx.ReducedSolve(
-        form=sx.Affine(),
         unknown_domain=rod.unknown_domain,
         rank=rank,
         snapshots=32,

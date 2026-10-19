@@ -33,7 +33,6 @@ from jaxtyping import Array, Float, Int, PRNGKeyArray, PyTree
 
 from surreax.domain import Domain
 from surreax.fitted import FittedSurrogate
-from surreax.forms.protocol import LinearForm
 from surreax.report import ErrorReport
 from surreax.sparse_solve import LinearSolver
 
@@ -210,8 +209,6 @@ class AutoencoderSolve(eqx.Module):
 
     unknown_dimension: int = eqx.field(static=True)
     rank: int = eqx.field(static=True)
-    form: LinearForm | None = None
-    """Form of the input-to-latent map that `fit_implicit` fits, not used by the solver."""
     width: int = eqx.field(static=True, default=32)
     depth: int = eqx.field(static=True, default=2)
     steps: int = eqx.field(static=True, default=1000)

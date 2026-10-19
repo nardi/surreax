@@ -24,12 +24,13 @@ def _near_starts() -> sx.Box:
 
 def test_exact_solve_raises_when_the_newton_solves_diverge() -> None:
     system = _diode_network()
-    far = sx.ExactSolve(form=sx.Affine(), unknown_domain=_far_starts(), rank=4, newton_steps=14)
+    far = sx.ExactSolve(unknown_domain=_far_starts(), rank=4, newton_steps=14)
     with pytest.raises(eqx.EquinoxRuntimeError, match="did not converge"):
-        sx.fit_implicit(system.residual, system.domain, far, samples=32)
+        sx.fit_implicit(system.residual, system.domain, far, sx.Affine(), samples=32)
     # The same solves from a closer start converge, and the fit goes through.
-    near = sx.ExactSolve(form=sx.Affine(), unknown_domain=_near_starts(), rank=4, newton_steps=14)
-    assert sx.fit_implicit(system.residual, system.domain, near, samples=32) is not None
+    near = sx.ExactSolve(unknown_domain=_near_starts(), rank=4, newton_steps=14)
+    fitted = sx.fit_implicit(system.residual, system.domain, near, sx.Affine(), samples=32)
+    assert fitted is not None
 
 
 def _reduced_solve(tolerance: float | None) -> sx.ReducedSolve:

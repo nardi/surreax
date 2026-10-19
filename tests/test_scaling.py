@@ -23,7 +23,6 @@ def _baseline_residual() -> float:
 
 def test_reduced_solve_scales_to_a_large_field() -> None:
     method = sx.ReducedSolve(
-        form=sx.Affine(),
         unknown_domain=systems.large_sparse_unknown_domain(),
         rank=systems.LARGE_INPUTS,
         snapshots=16,
@@ -31,7 +30,11 @@ def test_reduced_solve_scales_to_a_large_field() -> None:
         reduced_steps=4,
     )
     surrogate = sx.fit_implicit(
-        systems.large_sparse_residual, systems.large_sparse_domain(), method, samples=64
+        systems.large_sparse_residual,
+        systems.large_sparse_domain(),
+        method,
+        sx.Affine(),
+        samples=64,
     )
     # The large field is predicted through four latent coefficients.
     assert surrogate.output_reduction.decode_matrix.shape == (systems.LARGE_STATE, 4)
@@ -40,13 +43,16 @@ def test_reduced_solve_scales_to_a_large_field() -> None:
 
 def test_exact_solve_scales_to_a_large_field() -> None:
     method = sx.ExactSolve(
-        form=sx.Affine(),
         unknown_domain=systems.large_sparse_unknown_domain(),
         rank=systems.LARGE_INPUTS,
         newton_steps=4,
     )
     surrogate = sx.fit_implicit(
-        systems.large_sparse_residual, systems.large_sparse_domain(), method, samples=64
+        systems.large_sparse_residual,
+        systems.large_sparse_domain(),
+        method,
+        sx.Affine(),
+        samples=64,
     )
     assert surrogate.output_reduction.encode_matrix.shape == (4, systems.LARGE_STATE)
     assert float(surrogate.report.value_mean) / _baseline_residual() < 1e-3
@@ -55,7 +61,6 @@ def test_exact_solve_scales_to_a_large_field() -> None:
 def test_reduced_solver_call_is_cheap_at_scale() -> None:
     # The distilled surrogate maps the small input straight to the large field.
     method = sx.ReducedSolve(
-        form=sx.Affine(),
         unknown_domain=systems.large_sparse_unknown_domain(),
         rank=systems.LARGE_INPUTS,
         snapshots=16,
@@ -63,7 +68,11 @@ def test_reduced_solver_call_is_cheap_at_scale() -> None:
         reduced_steps=4,
     )
     surrogate = sx.fit_implicit(
-        systems.large_sparse_residual, systems.large_sparse_domain(), method, samples=64
+        systems.large_sparse_residual,
+        systems.large_sparse_domain(),
+        method,
+        sx.Affine(),
+        samples=64,
     )
     field = surrogate(jnp.array([0.4, -0.2, 0.6, 0.0]))
     assert field.shape == (systems.LARGE_STATE,)
@@ -97,7 +106,7 @@ def test_learned_manifold_training_lowers_the_residual_with_more_steps() -> None
 
     def after(steps: int) -> float:
         method = sx.AutoencoderSolve(
-            form=sx.Affine(), unknown_dimension=32, rank=4, steps=steps
+            unknown_dimension=32, rank=4, steps=steps
         )
         return float(sx.autoencoder_solver(rod.residual, rod.domain, method).training_residual)
 

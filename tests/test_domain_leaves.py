@@ -182,9 +182,9 @@ def test_flat_input_entry_points_need_a_box() -> None:
     domain = sx.product({"rate": sx.log_range([0.1], [1.0])})
     with pytest.raises(TypeError, match="Box"):
         sx.fit_separable(lambda inputs: inputs["rate"], domain, sx.Affine())
-    method = sx.InverseMap(form=sx.Affine(), unknown_domain=sx.box([-1.0], [1.0]))
+    method = sx.InverseMap(unknown_domain=sx.box([-1.0], [1.0]))
     with pytest.raises(TypeError, match="Box"):
-        sx.fit_implicit(lambda x, y: y - x, domain, method)
+        sx.fit_implicit(lambda x, y: y - x, domain, method, sx.Affine())
 
 
 @pytest.mark.parametrize("sampler", ["sobol", "halton", "latin_hypercube"])

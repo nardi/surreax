@@ -6,6 +6,18 @@ fits one. You pass it a `method` object that picks the strategy, and it returns
 a fitted surrogate. Leaving the method out picks one from the residual, which
 needs an `unknown_domain` to draw unknowns from.
 
+## The form of the fitted map
+
+Every method but `Objective` fits a linear form to some map, and `fit_implicit`
+takes that form as its fourth argument. For an `InverseMap` the map goes from
+the input and the residual to the unknown. For an `ExactSolve` it goes from the
+input to the reduced unknown, and for a `ReducedSolve` or an `AutoencoderSolve`
+it goes from the input to the latent. Leaving the form out picks one with
+`recommend_implicit_form`. A residual that is affine in the unknown gets an
+`Affine` form, and any other residual gets a `ChebyshevPolynomial`. An
+`Objective` is the form it trains, so passing a form alongside it raises an
+error.
+
 ## The inverse map
 
 The `InverseMap` method inverts the residual in its second argument. Writing
@@ -17,8 +29,8 @@ The `InverseMap` method inverts the residual in its second argument. Writing
 
 A Newton step pulls the sampled unknowns near the solution manifold first, so
 the residuals cluster near zero where the slice is read. It is one linear solve
-per point, not an iterative solve. `InverseMap` carries the form, the domain the
-unknown is drawn from, and the Newton step count.
+per point, not an iterative solve. `InverseMap` carries the domain the unknown
+is drawn from and the Newton step count.
 
 ## An affine residual
 
@@ -39,8 +51,8 @@ def residual(x, y):
 
 
 domain = sx.box([-1.0, -1.0], [1.0, 1.0])
-method = sx.InverseMap(form=sx.Affine(), unknown_domain=sx.box([-1.0, -1.0], [1.0, 1.0]))
-surrogate = sx.fit_implicit(residual, domain, method, samples=256)
+method = sx.InverseMap(unknown_domain=sx.box([-1.0, -1.0], [1.0, 1.0]))
+surrogate = sx.fit_implicit(residual, domain, method, sx.Affine(), samples=256)
 
 point = jnp.array([0.4, -0.2])
 assert jnp.allclose(surrogate(point), jnp.linalg.solve(matrix, point), atol=1e-3)
@@ -63,10 +75,8 @@ def residual(x, y):
 
 
 domain = sx.box([-2.0], [2.0])
-method = sx.InverseMap(
-    form=sx.ChebyshevPolynomial(degree=4), unknown_domain=sx.box([-1.2], [1.2]), newton_steps=2
-)
-surrogate = sx.fit_implicit(residual, domain, method, samples=512)
+method = sx.InverseMap(unknown_domain=sx.box([-1.2], [1.2]), newton_steps=2)
+surrogate = sx.fit_implicit(residual, domain, method, sx.ChebyshevPolynomial(degree=4), samples=512)
 
 # The surrogate leaves a small residual across the domain.
 assert float(surrogate.report.value_mean) < 0.5
@@ -99,10 +109,8 @@ def residual(x, y):
 
 
 domain = sx.box([0.25], [1.0])
-method = sx.InverseMap(
-    form=sx.ChebyshevPolynomial(degree=4), unknown_domain=sx.box([-1.1], [1.1]), newton_steps=6
-)
-surrogate = sx.fit_implicit(residual, domain, method, samples=256)
+method = sx.InverseMap(unknown_domain=sx.box([-1.1], [1.1]), newton_steps=6)
+surrogate = sx.fit_implicit(residual, domain, method, sx.ChebyshevPolynomial(degree=4), samples=256)
 
 # The surrogate sits on one branch, so every prediction shares a sign.
 points = jnp.linspace(0.3, 0.95, 20)[:, None]
@@ -134,12 +142,11 @@ def residual(x, y):
 
 
 domain = sx.box([-2.0], [2.0])
-method = sx.InverseMap(
-    form=sx.ChebyshevPolynomial(degree=4), unknown_domain=sx.box([-1.2], [1.2]), newton_steps=2
-)
+method = sx.InverseMap(unknown_domain=sx.box([-1.2], [1.2]), newton_steps=2)
+form = sx.ChebyshevPolynomial(degree=4)
 
-base = sx.fit_implicit(residual, domain, method, samples=512)
-refined = sx.fit_implicit(residual, domain, method, samples=512, refine_steps=3)
+base = sx.fit_implicit(residual, domain, method, form, samples=512)
+refined = sx.fit_implicit(residual, domain, method, form, samples=512, refine_steps=3)
 assert float(refined.report.value_mean) < float(base.report.value_mean)
 ```
 
@@ -230,10 +237,8 @@ def residual(x, y):
 
 
 domain = sx.box([-1.0, -1.0, -1.0], [1.0, 1.0, 1.0])
-method = sx.ExactSolve(
-    form=sx.Affine(), unknown_domain=sx.box([-3.0] * 64, [3.0] * 64), rank=3, newton_steps=5
-)
-surrogate = sx.fit_implicit(residual, domain, method, samples=128)
+method = sx.ExactSolve(unknown_domain=sx.box([-3.0] * 64, [3.0] * 64), rank=3, newton_steps=5)
+surrogate = sx.fit_implicit(residual, domain, method, sx.Affine(), samples=128)
 
 # The 64 unknowns are predicted through 3 reduced coefficients.
 assert surrogate.output_reduction.encode_matrix.shape[0] == 3
@@ -315,9 +320,7 @@ the input-to-latent map into an explicit surrogate, so inference needs no solve.
 This is the non-intrusive reduced-order model, POD-NN, of Hesthaven and Ubbiali,
 [POD-NN](https://doi.org/10.1016/j.jcp.2018.02.037).
 
-The `form` is the form of the input-to-latent map that `fit_implicit` fits. It is
-optional, since `reduced_solver` builds the solver without a surrogate, and
-`fit_implicit` raises an error if a method has none.
+`reduced_solver` builds the solver without a surrogate, so it takes no form.
 
 The basis is linear here, which suits a solution manifold whose Kolmogorov
 n-width decays fast. A strongly curved manifold needs the learned manifold of a
@@ -345,10 +348,8 @@ def residual(x, y):
 
 domain = sx.box([-1.0, -1.0, -1.0], [1.0, 1.0, 1.0])
 # Only 16 full solves build the basis, then every sample is reduce-solved.
-method = sx.ReducedSolve(
-    form=sx.Affine(), unknown_domain=sx.box([-3.0] * 64, [3.0] * 64), rank=3, snapshots=16
-)
-surrogate = sx.fit_implicit(residual, domain, method, samples=128)
+method = sx.ReducedSolve(unknown_domain=sx.box([-3.0] * 64, [3.0] * 64), rank=3, snapshots=16)
+surrogate = sx.fit_implicit(residual, domain, method, sx.Affine(), samples=128)
 
 assert surrogate.output_reduction.decode_matrix.shape == (64, 3)
 assert float(surrogate.report.value_mean) < 1e-3
@@ -411,9 +412,9 @@ follow a manifold that bends, in the manner of Lee and Carlberg,
 that the result is no longer a linear program, and the training is slower than a
 closed-form fit.
 
-`autoencoder_solver` returns the trained solver on its own, without a `form`, and
-`fit_implicit` distills it with the `form` of the method into a `DecodedSurrogate` that predicts the latent and decodes it, so
-inference needs no solve. Like the network form, it holds an activation function,
+`autoencoder_solver` returns the trained solver on its own. `fit_implicit`
+distills it with the `form` it receives into a `DecodedSurrogate` that predicts
+the latent and decodes it, so inference needs no solve. Like the network form, it holds an activation function,
 so jit it with `equinox.filter_jit`.
 
 <!-- name: test_implicit_autoencoder -->
@@ -478,9 +479,7 @@ def residual(x, y):
 
 
 domain = sx.box([-1.0, -1.0, -1.0], [1.0, 1.0, 1.0])
-method = sx.ReducedSolve(
-    form=sx.Affine(), unknown_domain=sx.box([-3.0] * 64, [3.0] * 64), rank=3, snapshots=16
-)
+method = sx.ReducedSolve(unknown_domain=sx.box([-3.0] * 64, [3.0] * 64), rank=3, snapshots=16)
 # Three sources span this field exactly, so the linear model stays.
 assert sx.recommend_reduced_method(residual, domain, method) is method
 ```

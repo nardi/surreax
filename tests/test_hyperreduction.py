@@ -26,7 +26,6 @@ def _hot_spot_solvers(points: int) -> tuple[implicit_systems.ImplicitSystem, sx.
         system.residual,
         system.domain,
         sx.ReducedSolve(
-            form=sx.Affine(),
             unknown_domain=system.unknown_domain,
             rank=6,
             snapshots=32,
@@ -97,7 +96,7 @@ def test_learned_manifold_hyper_reduces_on_a_graph() -> None:
     learned = sx.autoencoder_solver(
         circuit.residual,
         circuit.domain,
-        sx.AutoencoderSolve(form=sx.Affine(), unknown_dimension=64, rank=4, steps=600),
+        sx.AutoencoderSolve(unknown_dimension=64, rank=4, steps=600),
     )
     hyper = sx.hyper_reduce(learned, circuit.residual, circuit.domain, basis_size=12, samples=20)
     points = circuit.domain.sample_unit(jax.random.uniform(jax.random.key(9), (32, 4)))

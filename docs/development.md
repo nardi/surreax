@@ -56,6 +56,14 @@ and jaxtyping with beartype checks array shapes at runtime during tests.
 - All code is formatted and linted with Ruff, and type-checked with `ty`.
 - Tests use pytest, with hypothesis for numerical invariants and
   pytest-benchmark for the hot paths. Branch coverage is kept at 100%.
+- Tests live in `tests/unit`, `tests/integration` and `tests/benchmarks`. A unit
+  test checks one module on small inputs. An integration test fits a whole
+  surrogate on a test system, or combines several modules. The directories carry
+  the markers `unit`, `integration` and `benchmark`, so `pytest -m unit` and
+  `pytest tests/unit` select the same tests. The shared test systems stay in
+  `tests/`.
+- The benchmarks build and fit their systems before they time anything, so the
+  directory takes several minutes. `pytest -m "not benchmark"` skips it.
 - Every code example on this site is executed by markdown-pytest in CI, so an
   example that breaks fails the build.
 

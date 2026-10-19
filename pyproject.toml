@@ -53,6 +53,11 @@ ignore = ["F722"]
 [tool.pytest.ini_options]
 testpaths = ["tests", "docs", "README.md"]
 addopts = "--strict-markers"
+markers = [
+    "unit: one module on small inputs",
+    "integration: several modules together, or a whole fit on a test system",
+    "benchmark: timings of the hot paths",
+]
 
 [tool.coverage.run]
 branch = true

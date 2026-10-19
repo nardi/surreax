@@ -52,11 +52,17 @@ def test_newton_steps_lower_the_residual() -> None:
     form = sx.ChebyshevPolynomial(degree=4)
     unknown_domain = sx.box([-1.2], [1.2])
     without = sx.fit_implicit(
-        _cubic, domain, sx.InverseMap(unknown_domain=unknown_domain, newton_steps=0), form,
+        _cubic,
+        domain,
+        sx.InverseMap(unknown_domain=unknown_domain, newton_steps=0),
+        form,
         samples=512,
     )
     with_steps = sx.fit_implicit(
-        _cubic, domain, sx.InverseMap(unknown_domain=unknown_domain, newton_steps=2), form,
+        _cubic,
+        domain,
+        sx.InverseMap(unknown_domain=unknown_domain, newton_steps=2),
+        form,
         samples=512,
     )
     assert float(with_steps.report.value_mean) < float(without.report.value_mean)
@@ -123,18 +129,14 @@ def test_fold_is_flagged_where_the_jacobian_turns_singular() -> None:
     monotone = sx.InverseMap(
         unknown_domain=sx.box([-1.2], [1.2]), newton_steps=2, fold_tolerance=0.3
     )
-    monotone_fit = sx.fit_implicit(
-        _cubic, sx.box([-2.0], [2.0]), monotone, quartic, samples=256
-    )
+    monotone_fit = sx.fit_implicit(_cubic, sx.box([-2.0], [2.0]), monotone, quartic, samples=256)
     assert not monotone_fit.fold.folds
     assert float(monotone_fit.fold.min_determinant) > float(fold_fit.fold.min_determinant)
 
 
 @pytest.mark.slow
 def test_continuation_follows_one_branch() -> None:
-    method = sx.InverseMap(
-        unknown_domain=sx.box([0.05], [1.1]), newton_steps=6, continuation=True
-    )
+    method = sx.InverseMap(unknown_domain=sx.box([0.05], [1.1]), newton_steps=6, continuation=True)
     surrogate = sx.fit_implicit(
         _square, sx.box([0.0], [1.0]), method, sx.ChebyshevPolynomial(degree=4), samples=256
     )
@@ -170,9 +172,7 @@ def test_root_find_and_refine_solve_a_scalar_root() -> None:
 
 
 _GRID = jnp.linspace(0.0, 1.0, 64)
-_SHAPES = jnp.stack(
-    [jnp.sin(jnp.pi * _GRID), jnp.sin(2 * jnp.pi * _GRID), _GRID * (1 - _GRID)]
-)
+_SHAPES = jnp.stack([jnp.sin(jnp.pi * _GRID), jnp.sin(2 * jnp.pi * _GRID), _GRID * (1 - _GRID)])
 
 
 def _diffusion(x: jax.Array, y: jax.Array) -> jax.Array:
@@ -186,9 +186,7 @@ def _diffusion(x: jax.Array, y: jax.Array) -> jax.Array:
 @pytest.mark.slow
 def test_exact_solve_fits_a_large_sparse_system() -> None:
     domain = sx.box([-1.0, -1.0, -1.0], [1.0, 1.0, 1.0])
-    method = sx.ExactSolve(
-        unknown_domain=sx.box([-3.0] * 64, [3.0] * 64), rank=3, newton_steps=5
-    )
+    method = sx.ExactSolve(unknown_domain=sx.box([-3.0] * 64, [3.0] * 64), rank=3, newton_steps=5)
     surrogate = sx.fit_implicit(_diffusion, domain, method, sx.Affine(), samples=128)
     # The 64 unknowns collapse to 3 coefficients, and the fit stays exact.
     assert surrogate.output_reduction.encode_matrix.shape[0] == 3
@@ -324,8 +322,11 @@ def test_reduced_solver_derivative_matches_the_reference() -> None:
     # And a central difference, to a looser tolerance.
     eps = 1e-4
     finite = jnp.stack(
-        [(solver.latent(point.at[i].add(eps)) - solver.latent(point.at[i].add(-eps))) / (2 * eps)
-         for i in range(4)],
+        [
+            (solver.latent(point.at[i].add(eps)) - solver.latent(point.at[i].add(-eps)))
+            / (2 * eps)
+            for i in range(4)
+        ],
         axis=1,
     )
     assert jnp.allclose(implicit_jacobian, finite, atol=1e-2)
@@ -371,9 +372,7 @@ def test_greedy_snapshots_beat_fixed_on_worst_case() -> None:
         return float(jnp.max(left))
 
     settings = dict(rank=3, snapshots=6, reduced_steps=15, linear_solver="dense")
-    fixed = sx.reduced_solver(
-        _rom_localized, _ROM_XDOMAIN, _rom_method(**settings), samples=64
-    )
+    fixed = sx.reduced_solver(_rom_localized, _ROM_XDOMAIN, _rom_method(**settings), samples=64)
     greedy = sx.reduced_solver(
         _rom_localized, _ROM_XDOMAIN, _rom_method(**settings, greedy=True), samples=64
     )

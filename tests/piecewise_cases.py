@@ -46,9 +46,7 @@ class Case:
 
     def fit(self, form: sx.Form) -> sx.FittedSurrogate:
         """Fit a form to the latent coefficients of the solver."""
-        return sx.fit(
-            self.solver.latent, self.domain, form, samples=512, worst_case_starts=0
-        )
+        return sx.fit(self.solver.latent, self.domain, form, samples=512, worst_case_starts=0)
 
 
 def build(name: str) -> Case:

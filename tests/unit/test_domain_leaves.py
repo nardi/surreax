@@ -196,7 +196,11 @@ def test_every_sampler_fits_a_smooth_target(sampler: sx.Sampler) -> None:
 
     domain = sx.box([-1.0, -1.0], [1.0, 1.0])
     surrogate = sx.fit(
-        target, domain, sx.ChebyshevPolynomial(degree=6), samples=256, sampler=sampler,
+        target,
+        domain,
+        sx.ChebyshevPolynomial(degree=6),
+        samples=256,
+        sampler=sampler,
         worst_case_starts=0,
     )
     assert float(surrogate.report.value_max) < 2e-3

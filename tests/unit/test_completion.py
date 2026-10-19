@@ -65,8 +65,10 @@ def _circle(x: jax.Array, y: jax.Array) -> jax.Array:
 @pytest.mark.slow
 @pytest.mark.parametrize(
     ("target", "constraint"),
-    [(_balanced, sx.Constraint(_balance, dependent=(2,))),
-     (_on_a_circle, sx.Constraint(_circle, dependent=(1,)))],
+    [
+        (_balanced, sx.Constraint(_balance, dependent=(2,))),
+        (_on_a_circle, sx.Constraint(_circle, dependent=(1,))),
+    ],
     ids=["affine", "nonlinear"],
 )
 def test_the_completed_jacobian_matches_finite_differences(

@@ -163,9 +163,9 @@ def _least_squares_latent_jvp(
     # An unperturbed array arrives with a `None` tangent, which `jax.jvp` needs as
     # an explicit zero of the same shape.
     model_tangent = jax.tree.map(
-        lambda array, tangent: None
-        if array is None
-        else (jnp.zeros_like(array) if tangent is None else tangent),
+        lambda array, tangent: (
+            None if array is None else (jnp.zeros_like(array) if tangent is None else tangent)
+        ),
         arrays,
         model_tangent,
         is_leaf=lambda leaf: leaf is None,
@@ -283,9 +283,9 @@ def _relative_residual(
     """Mean residual the decoded solve leaves, over the mean residual at zero."""
     autoencoder = model.autoencoder
     latents = jax.vmap(lambda x: _latent_solve(autoencoder, x, model.guess(x), steps))(inputs)
-    left = jax.vmap(
-        lambda x, z: jnp.linalg.norm(autoencoder.residual(x, autoencoder.decode(z)))
-    )(inputs, latents)
+    left = jax.vmap(lambda x, z: jnp.linalg.norm(autoencoder.residual(x, autoencoder.decode(z))))(
+        inputs, latents
+    )
     unknown_dimension = autoencoder.center.shape[0]
     base = jax.vmap(
         lambda x: jnp.linalg.norm(autoencoder.residual(x, jnp.zeros(unknown_dimension)))
@@ -327,9 +327,7 @@ def _consistency(model: _Trainable, latents: Float[Array, "b r"]) -> Float[Array
     """Mean squared distance between `E(D(z))` and `z`."""
     autoencoder = model.autoencoder
     return jnp.mean(
-        jax.vmap(lambda z: jnp.sum((autoencoder.encode(autoencoder.decode(z)) - z) ** 2))(
-            latents
-        )
+        jax.vmap(lambda z: jnp.sum((autoencoder.encode(autoencoder.decode(z)) - z) ** 2))(latents)
     )
 
 
@@ -405,9 +403,9 @@ def train_autoencoder(
         model = _Trainable(autoencoder, guess)
 
     # A fixed scale from the residual at zero keeps the loss near one at the start.
-    base = jax.vmap(
-        lambda x: jnp.sum(residual(x, jnp.zeros(method.unknown_dimension)) ** 2)
-    )(held_out)
+    base = jax.vmap(lambda x: jnp.sum(residual(x, jnp.zeros(method.unknown_dimension)) ** 2))(
+        held_out
+    )
     scale = jnp.mean(base)
     scale = jnp.where(scale > 0, scale, 1.0)
 

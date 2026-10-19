@@ -181,9 +181,7 @@ def test_benchmark_newton_solve_against_linear_solver(
         inputs = built.domain.sample_unit(unit)
         starts = jnp.zeros((8, built.unknown_domain.dimension))
         setup = newton_setup(built.residual, linear_solver, reuse, inputs[0], starts[0])
-        solve = jax.jit(
-            lambda a, b: _solve_independently_with(setup, built.residual, a, b, 6)
-        )
+        solve = jax.jit(lambda a, b: _solve_independently_with(setup, built.residual, a, b, 6))
         jax.block_until_ready(solve(inputs, starts))
         benchmark(lambda: jax.block_until_ready(solve(inputs, starts)))
 

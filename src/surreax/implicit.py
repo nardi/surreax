@@ -640,9 +640,7 @@ def _reduced_root_jvp(
     latent_jacobian = jax.jacobian(
         lambda latent: _reduced_residual(residual, x, latent, center, basis)
     )(z)
-    _, p_dot = jax.jvp(
-        lambda a, b, c: _reduced_residual(residual, a, z, b, c), primals, tangents
-    )
+    _, p_dot = jax.jvp(lambda a, b, c: _reduced_residual(residual, a, z, b, c), primals, tangents)
     return z, -jnp.linalg.solve(latent_jacobian, p_dot)
 
 
@@ -747,6 +745,7 @@ def _greedy_states(
     which is cheap, and full-solves only the worst, so the full solves stay at the
     snapshot budget while the basis targets where it is weakest.
     """
+
     def leftover(
         x: Float[Array, " d"], center: Float[Array, " m"], basis: Float[Array, "r m"]
     ) -> Float[Array, ""]:
@@ -953,9 +952,9 @@ def _fit_objective(
     feature_count = method.form.features(normalized[0]).shape[0]
 
     def loss(weights, _):
-        residuals = jax.vmap(
-            lambda x, z: residual(x, weights @ method.form.features(z))
-        )(inputs, normalized)
+        residuals = jax.vmap(lambda x, z: residual(x, weights @ method.form.features(z)))(
+            inputs, normalized
+        )
         return jnp.mean(residuals**2)
 
     solver = optx.OptaxMinimiser(optax.adam(method.learning_rate), rtol=1e-8, atol=1e-8)

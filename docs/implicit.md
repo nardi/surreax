@@ -79,7 +79,9 @@ def residual(x, y):
 
 domain = sx.box([-2.0], [2.0])
 method = sx.InverseMap(unknown_domain=sx.box([-1.2], [1.2]), newton_steps=2)
-surrogate = sx.fit_implicit(residual, domain, method, sx.ChebyshevPolynomial(degree=4), samples=512)
+surrogate = sx.fit_implicit(
+    residual, domain, method, sx.ChebyshevPolynomial(degree=4), samples=512
+)
 
 # The surrogate leaves a small residual across the domain.
 assert float(surrogate.report.value_mean) < 0.5
@@ -113,7 +115,9 @@ def residual(x, y):
 
 domain = sx.box([0.25], [1.0])
 method = sx.InverseMap(unknown_domain=sx.box([-1.1], [1.1]), newton_steps=6)
-surrogate = sx.fit_implicit(residual, domain, method, sx.ChebyshevPolynomial(degree=4), samples=256)
+surrogate = sx.fit_implicit(
+    residual, domain, method, sx.ChebyshevPolynomial(degree=4), samples=256
+)
 
 # The surrogate sits on one branch, so every prediction shares a sign.
 points = jnp.linspace(0.3, 0.95, 20)[:, None]

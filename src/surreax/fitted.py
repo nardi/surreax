@@ -30,9 +30,7 @@ class FittedSurrogate(eqx.Module):
 
     input_reduction: LinearReduction
     input_normalizer: Normalizer
-    model: (
-        LinearModel | MaxAffine | DifferenceOfMaxAffine | Network | ConvexNetwork | ReluNetwork
-    )
+    model: LinearModel | MaxAffine | DifferenceOfMaxAffine | Network | ConvexNetwork | ReluNetwork
     output_normalizer: Normalizer
     output_reduction: LinearReduction
     output_unravel: Unraveler = eqx.field(static=True)

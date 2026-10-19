@@ -76,9 +76,7 @@ def test_reduced_solver_call_is_cheap_at_scale() -> None:
     )
     field = surrogate(jnp.array([0.4, -0.2, 0.6, 0.0]))
     assert field.shape == (systems.LARGE_STATE,)
-    left = jnp.linalg.norm(
-        systems.large_sparse_residual(jnp.array([0.4, -0.2, 0.6, 0.0]), field)
-    )
+    left = jnp.linalg.norm(systems.large_sparse_residual(jnp.array([0.4, -0.2, 0.6, 0.0]), field))
     assert float(left) / _baseline_residual() < 1e-2
 
 
@@ -105,9 +103,7 @@ def test_learned_manifold_training_lowers_the_residual_with_more_steps() -> None
     rod = implicit_systems.radiating_rod(32)
 
     def after(steps: int) -> float:
-        method = sx.AutoencoderSolve(
-            unknown_dimension=32, rank=4, steps=steps
-        )
+        method = sx.AutoencoderSolve(unknown_dimension=32, rank=4, steps=steps)
         return float(sx.autoencoder_solver(rod.residual, rod.domain, method).training_residual)
 
     assert after(600) < after(100) / 2

@@ -32,9 +32,7 @@ class ImplicitSystem(NamedTuple):
     unknown_domain: sx.Box
 
 
-def _chain(
-    points: int, offsets: Sequence[int]
-) -> tuple[Int[Array, "m w"], Float[Array, "m w"]]:
+def _chain(points: int, offsets: Sequence[int]) -> tuple[Int[Array, "m w"], Float[Array, "m w"]]:
     """Neighbor indices along a chain, and a mask that is zero past either end."""
     index = np.arange(points)[:, None] + np.asarray(offsets)[None, :]
     inside = (index >= 0) & (index < points)

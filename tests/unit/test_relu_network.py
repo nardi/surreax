@@ -121,7 +121,9 @@ def test_the_convex_export_reproduces_the_surrogate_in_original_coordinates() ->
 
     # A nonpositive output scale would flip convexity, so the export refuses it.
     flipped = eqx.tree_at(
-        lambda s: s.output_normalizer, surrogate, Normalizer(
+        lambda s: s.output_normalizer,
+        surrogate,
+        Normalizer(
             center=surrogate.output_normalizer.center, scale=-surrogate.output_normalizer.scale
         ),
     )

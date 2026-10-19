@@ -209,9 +209,7 @@ def _grid_export(surrogate: FittedSurrogate, model: LinearModel, resolution: int
 
 def export(
     surrogate: FittedSurrogate,
-) -> (
-    MaxAffineExport | DifferenceExport | GridExport | ConvexNetworkExport | ReluNetworkExport
-):
+) -> MaxAffineExport | DifferenceExport | GridExport | ConvexNetworkExport | ReluNetworkExport:
     """Export a fitted piecewise linear surrogate as arrays in original coordinates."""
     model = surrogate.model
     if isinstance(model, LinearModel) and isinstance(model.form, Grid):

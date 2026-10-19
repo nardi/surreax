@@ -91,3 +91,22 @@ Hyper-reduction makes the online solve read only a few entries of the residual.
 `surreax` is formatted and linted with Ruff, type-checked with `ty`, and tested
 with pytest, hypothesis, and pytest-benchmark at 100% branch coverage. Every
 code example in the documentation is executed by markdown-pytest.
+
+## Testing
+
+As this is a model fitting library, tests may take a significant time to run. The recommended way to validate new code is to start with the quickest tests and work outward.
+
+```bash
+# While editing: the unit tests, without the slow ones.
+uv run pytest tests/unit -m "not slow"
+
+# For the area you changed: its unit and integration files.
+uv run pytest tests/unit/test_implicit.py tests/integration/test_sparse_solve.py
+
+# Before committing: every integration test, and the documentation examples.
+uv run pytest tests/integration docs README.md
+```
+
+The tests sit in `tests/unit`, `tests/integration` and `tests/benchmarks`, and each directory has a matching marker. A test that takes about ten seconds or more also carries the `slow` marker. The benchmarks fit their systems before they time anything, so `-m "not benchmark"` skips them.
+
+The full run with branch coverage, `uv run pytest --cov --cov-branch`, took about 50 minutes in one measured run. CI runs it and enforces the 100% coverage gate, so run it locally only when a change adds a branch that the focused runs may not reach.

@@ -13,8 +13,8 @@ flatten -> encode -> normalize -> model -> denormalize -> decode -> unflatten
 
 The flatten stage is the domain's `flatten`, which also maps a log-scaled or
 categorical input to its flat coordinates. Every stage is stored with the fitted
-object, not run as a separate preprocessing step you have to remember. The encode and decode stages are
-linear maps. Composing a linear map with a piecewise linear or convex model
+object, not run as a separate preprocessing step you have to remember. The
+encode and decode stages are linear maps. Composing a linear map with a piecewise linear or convex model
 keeps that structure in the original coordinates, which is why the reduction is
 linear rather than a general encoder.
 
@@ -30,7 +30,7 @@ The library leans on protocols rather than base classes.
    because Equinox needs it to register a pytree. Those modules are data
    containers, so behavior stays in free functions and small protocols.
 
-Because so much rides on structural typing, all library code is fully typed,
+The library relies on structural typing, so all library code is fully typed,
 and jaxtyping with beartype checks array shapes at runtime during tests.
 
 ## Code layout
@@ -75,7 +75,7 @@ and jaxtyping with beartype checks array shapes at runtime during tests.
 `surreax` overlaps with several existing libraries but aims at a narrower goal.
 
 - SMT fits general surrogates in Python with a derivative emphasis, but it is
-  not built on JAX and takes no interest in the form of the result.
+  not built on JAX and does not fix the form of the result.
 - ALAMO builds surrogates so they can be used in algebraic optimization, but it
   reaches tractability through sparsity rather than a chosen structural form.
 - OMLT turns already-trained models into optimization formulations, so it

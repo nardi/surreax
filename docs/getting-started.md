@@ -36,9 +36,9 @@ domain = sx.box([5.0, 0.2], [20.0, 1.3])
 If you already have a dataset of inputs, `sx.box_from_data(points)` infers the
 tightest box that contains them. A box around clustered or correlated data also
 contains empty regions the data never reached, so `sx.domain_from_data(points)`
-keeps a model of where the data lies as well. A surrogate fitted over it reads
+keeps a model of where the data lies as well. A surrogate fitted over it has
 `surrogate.coverage(x)`, which is at most one near the data and grows away from
-it, so you can flag a prediction that is an extrapolation. The report's
+it. Use it to flag a prediction that is an extrapolation. The report's
 `coverage_max` gives the largest coverage over the held-out points.
 
 <!-- name: test_start_coverage -->

@@ -108,7 +108,7 @@ sample, so they can miss a region where the fit is worst. Because the surrogate
 and the target are both differentiable, `fit` also climbs the error over the
 whole domain from several starts and reports the largest it finds, along with
 the point where it occurs. This is a tighter check than a sample statistic, and
-setting `worst_case_starts` to zero skips it when speed matters.
+`worst_case_starts=0` skips it when speed matters.
 
 <!-- name: test_techniques_worst_case -->
 ```python
@@ -284,9 +284,9 @@ same way, so a subset of the residual's equations holds exactly.
 
 ## Automatic strategy selection
 
-The structural analysis can also choose the form for you. Leaving the form out of
-`fit` reads the function kind of each output, affine, polynomial, piecewise
-linear, or discontinuous, and picks a form to match. The choice is advisory, so
+The structural analysis can also choose the form for you. If you leave the form
+out of `fit`, it reads the function kind of each output, affine, polynomial,
+piecewise linear, or discontinuous, and picks a form to match. The choice is advisory, so
 a form you pass always wins.
 
 <!-- name: test_techniques_auto_form -->
@@ -338,4 +338,5 @@ a target that is linear in one block and nonlinear in another gets a linear form
 on the first and a richer form on the second. `fit_implicit` chooses a method
 from the residual, an inverse map for a small unknown and a reducing solve for a
 large one, when you pass an `unknown_domain` and no method. You can inspect the
-reading directly with `function_kinds`, `recommend_form`, and `recommend_method`.
+reading directly with `function_kinds`, `recommend_form`, `recommend_method`, and
+`recommend_implicit_form`.

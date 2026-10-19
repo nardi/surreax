@@ -1,7 +1,7 @@
 <div align="center">
 
   <h2 align="center">
-  <code>surreax</code> - Surrogate model training for JAX functions
+  <code>surreax</code>: surrogate model training for JAX functions
   </h2>
 
 </div>
@@ -14,8 +14,8 @@ second function that behaves approximately like the first one, but has a form
 you chose in advance.
 
 You fix the form up front because some forms are easy to reason about after you
-fit them. A piecewise linear surrogate can be handed to a mixed-integer solver. A convex
-surrogate can be minimized reliably. A general neural network can do neither.
+fit them. A piecewise linear surrogate can be handed to a mixed-integer solver.
+A convex surrogate can be minimized reliably. A general neural network can do neither.
 `surreax` treats the form as the thing you care about, and accuracy as the
 thing to maximize once the form is fixed.
 
@@ -54,7 +54,7 @@ assert jacobian.shape == (1, 2)
 
 ## Motivation
 
-There are good surrogate libraries already. `surreax` aims at a narrower goal,
+Good surrogate libraries exist already, so `surreax` aims at a narrower goal,
 which leads to a few different choices:
 
 1. It is built on JAX, so the target's exact Jacobian is available and cheap.
@@ -76,10 +76,10 @@ dataset, in which case the surrogate reports how far a query lies from the data.
 A fit can train against target derivatives and work in a reduced space, found by
 PCA, an active subspace, or exact pruning. It can select a sparse basis by
 matching pursuit, split a separable target into blocks, add samples where it is
-worst, and hold an equality constraint exactly. Leaving the form out picks the form, its polynomial
-degree, the reductions, and the sparse budget from the target itself. The report
-separates value, derivative, and projection error, searches the worst case over
-the domain, and gives the structure cost.
+worst, and hold an equality constraint exactly. If you leave out the form, `fit`
+picks the form, its polynomial degree, the reductions, and the sparse budget from
+the target itself. The report separates value, derivative, and projection error,
+searches the worst case over the domain, and gives the structure cost.
 
 It also fits implicit targets given as a residual `g(x, y)`. The methods are the
 inverse map, a direct sparse Newton solve with output reduction, a linear
@@ -94,7 +94,9 @@ code example in the documentation is executed by markdown-pytest.
 
 ## Testing
 
-As this is a model fitting library, tests may take a significant time to run. The recommended way to validate new code is to start with the quickest tests and work outward.
+As this is a model fitting library, tests may take a significant time to run.
+The recommended way to validate new code is to start with the quickest tests
+and work outward.
 
 ```bash
 # While editing: the unit tests, without the slow ones.
@@ -107,6 +109,12 @@ uv run pytest tests/unit/test_implicit.py tests/integration/test_sparse_solve.py
 uv run pytest tests/integration docs README.md
 ```
 
-The tests sit in `tests/unit`, `tests/integration` and `tests/benchmarks`, and each directory has a matching marker. A test that takes about ten seconds or more also carries the `slow` marker. The benchmarks fit their systems before they time anything, so `-m "not benchmark"` skips them.
+The tests sit in `tests/unit`, `tests/integration` and `tests/benchmarks`, and
+each directory has a matching marker. A test that takes about ten seconds or
+more also carries the `slow` marker. The benchmarks fit their systems before
+they time anything, so `-m "not benchmark"` skips them.
 
-The full run with branch coverage, `uv run pytest --cov --cov-branch`, took about 50 minutes in one measured run. CI runs it and enforces the 100% coverage gate, so run it locally only when a change adds a branch that the focused runs may not reach.
+The full run with branch coverage, `uv run pytest --cov --cov-branch`, took
+about 50 minutes in one measured run. CI runs it and enforces the 100% coverage
+gate, so run it locally only when a change adds a branch that the focused runs
+may not reach.

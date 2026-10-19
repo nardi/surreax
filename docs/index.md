@@ -11,7 +11,7 @@ solver. A convex surrogate can be minimized reliably. A general neural network
 can do neither. `surreax` treats the form as the thing you care about, and
 accuracy as the thing to maximize once the form is fixed.
 
-## Install
+## Installation
 
 ```bash
 pip install surreax
@@ -56,7 +56,7 @@ assert jacobian.shape == (1, 2)
 
 ## Motivation
 
-There are good surrogate libraries already. `surreax` aims at a narrower target
+Good surrogate libraries exist already, so `surreax` aims at a narrower target
 than most of them, which leads to a few different choices:
 
 1. It is built on JAX, so the target's exact Jacobian is available and cheap.

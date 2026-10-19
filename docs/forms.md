@@ -174,7 +174,7 @@ as the max-affine form. A solver minimizes it as a linear program with one
 auxiliary variable per hidden unit, so the program grows with the number of
 units, not with the number of affine pieces.
 
-That is the difference from a max-affine fit. The sum `|x0| + ... + |x5|` of six
+It differs from a max-affine fit in size. The sum `|x0| + ... + |x5|` of six
 inputs has 64 affine pieces as a maximum, and a network writes it with about a
 dozen units. The nonnegative weights are the softplus of free parameters, and the
 fit is gradient descent through optimistix from several random starts, keeping the
@@ -209,8 +209,8 @@ concave. A mixed-integer program encodes it with one binary variable per hidden
 unit, each with a pair of big-M constraints. It trains the same way as the convex
 network.
 
-Both network forms have the same function classes as the max-affine forms, so
-the choice is about size and about how well the fit trains. The comparison below
+Each network form represents the same functions as its max-affine counterpart,
+so the choice is about size and about how well the fit trains. The comparison below
 comes from the test suite, with errors relative to the target on held-out points.
 
 - A target that is a sum of ridge functions in many inputs favors the networks.
@@ -219,7 +219,7 @@ comes from the test suite, with errors relative to the target on held-out points
   and 24 pieces and 336 parameters reaches 0.33. On the sum of absolute values the
   convex network reaches 0.036, the ReLU network 1e-3, and 48 max-affine pieces
   0.16.
-- A smooth response in few inputs favors the older forms at a small size. For the
+- A smooth response in few inputs favors the max-affine forms at a small size. For the
   latent coefficients of the radiating rod and the thermostat rod, a difference of
   max-affine with 4 and 4 pieces matched a ReLU network with about twice the
   parameters. On the four-input diode network, 8 and 8 pieces reached 0.0044
@@ -290,9 +290,10 @@ max-affine surrogate is a maximum of affine pieces, so it is a linear program,
 and a difference of two is a pair of them. `export` returns the slopes and
 intercepts as plain arrays, in the domain's flat coordinates, so you can write
 the encoding in whatever optimization framework you use. The network forms export
-their layer matrices the same way. For a box those are the
-inputs themselves, and for a `LogRange` input it is its logarithm. The library exports arrays
-and nothing else, to stay free of a solver dependency. For the mixed-integer and
+their layer matrices the same way. For a box the flat coordinates are the
+inputs themselves, and for a `LogRange` input the coordinate is its logarithm.
+The library exports arrays and nothing else, to stay free of a solver
+dependency. For the mixed-integer and
 linear-program encodings these arrays feed, see
 [OMLT](https://arxiv.org/abs/2202.02414).
 

@@ -1,10 +1,11 @@
 # Implicit targets
 
-Sometimes you cannot write the target down. You have a residual `g(x, y)` and
-want `f` with `g(x, f(x))` near zero, but no closed form for `f`. `fit_implicit`
-fits one. You pass it a `method` object that picks the strategy, and it returns
-a fitted surrogate. Leaving the method out picks one from the residual, which
-needs an `unknown_domain` to draw unknowns from.
+When you cannot write the target down, you may still have a residual `g(x, y)`
+and want `f` with `g(x, f(x))` near zero. `fit_implicit` fits such an `f`
+without a closed form for it. You pass it a `method` object that picks the
+strategy, and it returns a fitted surrogate. If you leave out the method,
+`fit_implicit` picks one from the residual, which needs an `unknown_domain` to
+draw unknowns from.
 
 ## The form of the fitted map
 
@@ -12,11 +13,13 @@ Every method but `Objective` fits a linear form to some map, and `fit_implicit`
 takes that form as its fourth argument. For an `InverseMap` the map goes from
 the input and the residual to the unknown. For an `ExactSolve` it goes from the
 input to the reduced unknown, and for a `ReducedSolve` or an `AutoencoderSolve`
-it goes from the input to the latent. Leaving the form out picks one with
-`recommend_implicit_form`. A residual that is affine in the unknown gets an
-`Affine` form, and any other residual gets a `ChebyshevPolynomial`. An
-`Objective` is the form it trains, so passing a form alongside it raises an
-error.
+it goes from the input to the latent. If you leave out the form, `fit_implicit`
+picks one with `recommend_implicit_form`. A residual that is affine in the
+unknown gets an `Affine` form. Any other residual gets a `ChebyshevPolynomial`
+of degree 3 for an `InverseMap` and of degree 2 for an `ExactSolve` or a
+`ReducedSolve`. An `AutoencoderSolve` always gets degree 3, since its latent
+coordinates are learned. An `Objective` is the form it trains, so passing a
+form alongside it will raise an error.
 
 ## The inverse map
 
@@ -25,7 +28,7 @@ The `InverseMap` method inverts the residual in its second argument. Writing
 `f(x) = h(x, 0)`. The inverse is cheap to sample. Draw `(x, y)`, evaluate
 `r = g(x, y)` forward, and the pair `((x, r), y)` is a labeled sample of `h`. So
 `h` is fitted as an ordinary regression over the augmented input `(x, r)`, and
-`f` reads it at the zero-residual slice. No root solve is involved.
+`f` reads it at the zero-residual slice with no root solve.
 
 A Newton step pulls the sampled unknowns near the solution manifold first, so
 the residuals cluster near zero where the slice is read. It is one linear solve
@@ -265,7 +268,7 @@ it on the `ExactSolve` it returns.
 
 ### Precision
 
-The direct solver follows the JAX precision you set, and surreax never changes
+The direct solver follows the JAX precision you set, and `surreax` never changes
 the JAX configuration. On CPU with x64 enabled it is KLU, which reuses the
 symbolic analysis and the pivot order from one Newton step to the next. Without
 x64 it is `Spsolve`, which solves in single precision and factors every step from
@@ -327,9 +330,9 @@ n-width decays fast. A strongly curved manifold needs the learned manifold of a
 later section. The latent dimension is the `rank`, and the residual falls as it
 reaches the intrinsic dimension of the manifold.
 
-Setting `greedy` chooses the snapshots one at a time where the current basis
-leaves the most residual, rather than taking the first `snapshots` samples, so it
-reaches a given accuracy with fewer full solves. It helps most when the hard
+With `greedy` set, the method chooses the snapshots one at a time where the
+current basis leaves the most residual, rather than taking the first `snapshots`
+samples, so it reaches a given accuracy with fewer full solves. It helps most when the hard
 states sit in a small part of the input space that uniform sampling underweights.
 
 <!-- name: test_implicit_reduced_order -->
@@ -414,8 +417,8 @@ closed-form fit.
 
 `autoencoder_solver` returns the trained solver on its own. `fit_implicit`
 distills it with the `form` it receives into a `DecodedSurrogate` that predicts
-the latent and decodes it, so inference needs no solve. Like the network form, it holds an activation function,
-so jit it with `equinox.filter_jit`.
+the latent and decodes it, so inference needs no solve. Like the network form,
+it holds an activation function, so jit it with `equinox.filter_jit`.
 
 <!-- name: test_implicit_autoencoder -->
 ```python
@@ -450,8 +453,8 @@ heater. Two numbers, the heater position and the flow rate, fix the state, but a
 linear basis needs about one mode per step position. On 64 points, eight linear
 modes still leave most of the residual.
 
-Training from a random start does not find that step. Setting `snapshots` solves
-that many full states first. The autoencoder starts from their linear basis and
+Training from a random start does not find that step. With `snapshots` set, the
+method solves that many full states first. The autoencoder starts from their linear basis and
 is trained to reconstruct them, then the residual training refines it. With 16
 snapshots, a rank-2 learned manifold leaves about a third of the residual that
 eight linear modes leave. A sharp feature also gives the latent solve local
@@ -487,8 +490,8 @@ assert sx.recommend_reduced_method(residual, domain, method) is method
 ## Hyper-reduction
 
 A reduced solve works in a small latent, but each Newton step still evaluates the
-whole residual, so its cost grows with the state. `hyper_reduce` removes that.
-It takes residual snapshots near the manifold, keeps a small residual basis, and
+whole residual, so its cost grows with the state. `hyper_reduce` removes that
+cost. It takes residual snapshots near the manifold, keeps a small residual basis, and
 picks a few residual entries from which that basis can be recovered, by the
 discrete empirical interpolation method of Chaturantabut and Sorensen,
 [DEIM](https://doi.org/10.1137/090766498). The latent solve then minimizes the

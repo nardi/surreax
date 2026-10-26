@@ -3,8 +3,9 @@
 This page walks through a full fit and the object it returns. A fit needs three
 things. The target is the function to approximate, the domain is the region
 where the approximation should be accurate, and the form is the shape the
-approximation may take, such as a polynomial. The recommended import is
-`import surreax as sx`.
+approximation may take, such as a polynomial. The [terminology](terminology.md)
+page defines these terms and the others that the documentation uses. The
+recommended import is `import surreax as sx`.
 
 ## The target
 

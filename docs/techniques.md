@@ -3,7 +3,8 @@
 Beyond the choice of form, `fit` takes a few options that change how the
 surrogate is fitted. Each one is off by default, except the worst-case search.
 The examples assume the target, domain and report of the [basic
-workflow](getting-started.md) and the forms of [model forms](forms.md).
+workflow](getting-started.md) and the forms of [model forms](forms.md). The
+[terminology](terminology.md) page defines the terms, with their mathematics.
 
 ## Derivative supervision
 

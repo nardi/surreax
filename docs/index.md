@@ -14,7 +14,9 @@ accuracy as the thing to maximize once the form is fixed.
 `surreax` fits two kinds of target. An explicit target is a function you can
 call, such as a simulation written in JAX. An implicit target is a residual
 `g(x, y)` that is zero when `y` solves the model for the input `x`, such as a
-discretized heat equation, and the surrogate is the map from `x` to `y`.
+discretized heat equation, and the surrogate is the map from `x` to `y`. The
+[terminology](terminology.md) page defines these terms and the others that the
+documentation uses.
 
 ## Installation
 
@@ -89,6 +91,8 @@ and the physics-informed tools.
   constraints, and automatic settings.
 - [Implicit targets](implicit.md) covers `fit_implicit`, the methods for large
   sparse systems, and the reduced-order models.
+- [Terminology](terminology.md) defines the terms used on these pages, such as
+  implicit and explicit surrogates and the exact solve, with their mathematics.
 - [Test systems](test-systems.md) describes the physical systems that the test
   suite fits, with their equations and the code that builds them.
 - [Development](development.md) describes the layout of the code and how the

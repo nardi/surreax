@@ -13,7 +13,11 @@ you leave out the method, `fit_implicit` picks one from the residual, which
 needs an `unknown_domain` to draw unknowns from. The residual takes the input as
 a flat array, so the input domain must be a `Box`. The [test
 systems](test-systems.md) page describes the physical residuals that the tests
-use, and several examples below are small versions of them.
+use, and several examples below are small versions of them. The
+[terminology](terminology.md#implicit-targets) page defines the terms of this
+page, such as the exact solve and the reduced solve. It also explains what is
+implicit about the target and what is not about the
+[result](terminology.md#explicit-and-implicit-surrogates).
 
 ## The form of the fitted map
 
@@ -200,13 +204,13 @@ workflow](getting-started.md#input-output-pairs) page describes it.
 ## Large sparse systems
 
 When the input is small but the unknown is large, a physical model discretized
-over many states, the `ExactSolve` method fits `f` at a scale the inverse map
-cannot reach. That works because the residual Jacobian in the unknown is sparse,
-so the Newton solve is cheap when the sparsity is used, and because `f` maps a
-small input to a large unknown, so the solved unknowns trace a manifold no wider
-than the input. `ExactSolve` solves `g = 0` at each sample, collapses the solved
-unknowns onto their leading principal directions, and fits the map into that
-small reduced space.
+over many states, the [`ExactSolve`](terminology.md#exact-solve) method fits `f`
+at a scale the inverse map cannot reach. That works because the residual
+Jacobian in the unknown is sparse, so the Newton solve is cheap when the
+sparsity is used, and because `f` maps a small input to a large unknown, so the
+solved unknowns trace a manifold no wider than the input. `ExactSolve` solves
+`g = 0` at each sample, collapses the solved unknowns onto their leading
+principal directions, and fits the map into that small reduced space.
 
 Each Newton step factors the sparse Jacobian by default.
 [asdex](https://github.com/adrhill/asdex) reads the sparsity pattern from the
@@ -314,13 +318,14 @@ may need `convergence_tolerance=None` to skip the check.
 ## The reduced-order model
 
 `ExactSolve` solves the full residual once per sample. When many samples are
-needed, or the solve is to be reused online, `ReducedSolve` solves in a small
-latent space instead. It builds a proper orthogonal decomposition basis from a
-few solved snapshots, projects the residual onto that basis in the manner of
-Galerkin, and solves the reduced residual by Newton in the latent. Each reduced
-step is an `r` by `r` solve, independent of the unknown size, and the snapshot
-solves use the `linear_solver` of the previous section. The method then distills
-the input-to-latent map into an explicit surrogate, so inference needs no solve.
+needed, or the solve is to be reused online,
+[`ReducedSolve`](terminology.md#reduced-solve) solves in a small latent space
+instead. It builds a proper orthogonal decomposition basis from a few solved
+snapshots, projects the residual onto that basis in the manner of Galerkin, and
+solves the reduced residual by Newton in the latent. Each reduced step is an `r`
+by `r` solve, independent of the unknown size, and the snapshot solves use the
+`linear_solver` of the previous section. The method then distills the
+input-to-latent map into an explicit surrogate, so inference needs no solve.
 This is the non-intrusive reduced-order model, POD-NN, of Hesthaven and Ubbiali,
 [POD-NN](https://doi.org/10.1016/j.jcp.2018.02.037).
 

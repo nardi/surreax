@@ -5,7 +5,8 @@ most accurate surrogate it can within that shape, so choosing the form sets the
 trade-off between accuracy and how easy the result is to reason about. You pass
 the form as the third argument of `fit`, and the [basic
 workflow](getting-started.md) page describes the other arguments and the report
-that every example below reads.
+that every example below reads. The [terminology](terminology.md) page defines
+the terms of this page, such as the linear form and the structure cost.
 
 | Form | Fitted by | Structure of the result |
 | --- | --- | --- |

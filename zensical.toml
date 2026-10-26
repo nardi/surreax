@@ -12,6 +12,7 @@ nav = [
   { "Model forms" = "forms.md" },
   { "Fitting techniques" = "techniques.md" },
   { "Implicit targets" = "implicit.md" },
+  { "Terminology" = "terminology.md" },
   { "Test systems" = "test-systems.md" },
   { "Development" = "development.md" },
 ]

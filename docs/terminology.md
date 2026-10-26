@@ -68,10 +68,11 @@ The [implicit targets](implicit.md) page describes how to fit one.
 
 ### Explicit and implicit surrogates
 
-The words describe how a surrogate is evaluated, and they do not follow the kind
-of target. A surrogate is explicit when evaluating it is a fixed feed-forward
-computation $\hat y = \hat f(x)$ with no equation to solve. It is implicit, or
-solve-at-call, when evaluating it still solves an equation.
+A surrogate is called explicit or implicit by how it is evaluated, which can
+differ from the kind of target it approximates. It is explicit when evaluating
+it is a fixed feed-forward computation $\hat y = \hat f(x)$ with no equation to
+solve. It is implicit, or solve-at-call, when evaluating it still solves an
+equation.
 
 Every fit of an explicit target gives an explicit surrogate. For an implicit
 target, `InverseMap`, `ExactSolve`, `Objective`, and the distilled form of

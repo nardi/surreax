@@ -105,8 +105,9 @@ Optimization and Engineering 10(1), 2009. A gradient route, from [Max-Affine
 Regression via First-Order Methods](https://arxiv.org/abs/2308.06276), is
 available with `method="gradient"`.
 
-You choose the number of pieces. The report gives the structure cost, the piece
-count, which sets how expensive the surrogate is to reason about later.
+You choose the number of pieces. The report gives the [structure
+cost](terminology.md#structure-cost), the piece count, which sets how expensive
+the surrogate is to reason about later.
 
 <!-- name: test_forms_max_affine -->
 ```python
@@ -228,14 +229,23 @@ assert all(bool(jnp.all(weights >= 0)) for weights in export.hidden_weights)
 represents every continuous piecewise linear function, the same set as the
 difference of max-affine form, so it fits targets that are neither convex nor
 concave. A mixed-integer program encodes it with one binary variable per hidden
-unit, each with a pair of big-M constraints. It trains the same way as the
-convex network.
+unit, each with a pair of big-M constraints, which switch an inequality on or
+off with that binary variable through a bound on the expression. It trains the
+same way as the convex network.
 
 Each network form represents the same functions as its max-affine counterpart,
 so the choice is about size and about how well the fit trains. The comparison
 below comes from the [test systems](test-systems.md) and the form comparison
-tests, with mean errors on held-out points. The systems named here are described
-on that page.
+tests, with mean errors on held-out points. The three systems are described on
+that page. The [radiating rod](test-systems.md#radiating-rod) is a rod with
+heaters that also loses heat by radiation. The [thermostat
+rod](test-systems.md#thermostat-rod) has thermostat-controlled heaters, which
+makes its response neither convex nor concave. The [diode
+network](test-systems.md#diode-network) is a mesh of resistors and diodes. The
+target of a fit is the [latent](terminology.md#latent) coefficients of a
+[reduced solver](test-systems.md#reduced-solvers-as-explicit-targets) of the
+system, which are the few numbers that describe all of its temperatures or
+voltages, as a function of two to four inputs.
 
 - A target that is a sum of ridge functions in many inputs favors the networks.
   On `|x0 - x1| - |x2 + 0.3 x3| + 0.5 x4` in six inputs, a ReLU network with 253
@@ -248,10 +258,11 @@ on that page.
   difference of max-affine with 4 and 4 pieces matched a ReLU network with about
   twice the parameters. On the four-input diode network, 8 and 8 pieces reached
   0.0044 against 0.0094 for a ReLU network with a similar parameter count. A
-  wider ReLU network did overtake the pieces on the rod, at 0.0096 with 354
-  parameters against 0.017 with 96.
-- A convex network cannot follow a response that is not convex. On the rod and
-  the thermostat rod it left more than three times the error of a ReLU network.
+  wider ReLU network did overtake the pieces on the radiating rod, at 0.0096
+  with 354 parameters against 0.017 with 96.
+- A convex network cannot follow a response that is not convex. On the radiating
+  rod and the thermostat rod it left more than three times the error of a ReLU
+  network.
 - The convex network trains less reliably than a plain one. On the mildly
   nonconvex diode network it reached 0.017, no better than max-affine with 16
   pieces at 0.012, and a wider network did worse at 0.025, so try a few widths.
@@ -318,10 +329,11 @@ intercepts as plain arrays, in the domain's flat coordinates, so you can write
 the encoding in whatever optimization framework you use. The network forms
 export their layer matrices the same way. For a box the flat coordinates are the
 inputs themselves, and for a `LogRange` input the coordinate is its logarithm.
-The export folds the input and output normalization into the arrays, so they act
-on the original input and produce the original output. It needs an identity
-output reduction, because a reduced output space mixes the outputs, and it
-raises an error otherwise.
+The [terminology](terminology.md#flat-coordinates) page defines the flat
+coordinates. The export folds the input and output normalization into the
+arrays, so they act on the original input and produce the original output. It
+needs an identity output reduction, because a reduced output space mixes the
+outputs, and it raises an error otherwise.
 
 The library exports arrays and nothing else, to stay free of a solver
 dependency. For the mixed-integer and linear-program encodings these arrays

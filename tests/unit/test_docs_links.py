@@ -1,4 +1,4 @@
-"""Checks that the code links on the test systems page still point at their definitions."""
+"""Checks that the code links in the documentation still point at their definitions."""
 
 import re
 from pathlib import Path
@@ -15,8 +15,12 @@ LINK = re.compile(
 
 
 def _links() -> list[tuple[str, str, int]]:
-    page = (ROOT / "docs" / "test-systems.md").read_text()
-    return [(m["symbol"], m["path"], int(m["line"])) for m in LINK.finditer(page)]
+    pages = sorted((ROOT / "docs").glob("*.md"))
+    return [
+        (m["symbol"], m["path"], int(m["line"]))
+        for page in pages
+        for m in LINK.finditer(page.read_text())
+    ]
 
 
 def test_the_page_links_to_code() -> None:

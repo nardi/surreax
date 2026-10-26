@@ -9,8 +9,9 @@ workflow](getting-started.md) and the forms of [model forms](forms.md). The
 ## Derivative supervision
 
 Because the target is written in JAX, its Jacobian is exact and cheap. Fitting
-against the Jacobian as well as the values is Sobolev training, from Czarnecki
-and colleagues, [Sobolev Training for Neural
+against the Jacobian as well as the values is Sobolev training, defined in the
+[terminology](terminology.md#derivative-supervision), from Czarnecki and
+colleagues, [Sobolev Training for Neural
 Networks](https://arxiv.org/abs/1706.04859), NeurIPS 2017. It matters when the
 surrogate goes into an optimizer, since the optimizer will consume its
 derivatives.
@@ -207,9 +208,10 @@ assert surrogate.input_reduction.encode_matrix.shape == (2, 5)
 assert float(surrogate.report.value_max) < 1e-3
 ```
 
-`analyze` returns the same reading as a report. It holds the coupling matrix and
-the block labels that split outputs and inputs into independent groups, so a
-separable target reads as separate blocks.
+`analyze` returns the same reading as a report. It holds the [coupling
+matrix](terminology.md#coupling-and-separable-blocks) and the block labels that
+split outputs and inputs into independent groups, so a separable target reads as
+separate blocks.
 
 <!-- name: test_techniques_analyze -->
 ```python
@@ -304,8 +306,9 @@ points = domain.sample_unit(jax.random.uniform(jax.random.key(0), (16, 2)))
 assert float(jnp.max(sx.constraint_residuals(surrogate, constraint, points))) < 1e-5
 ```
 
-In implicit mode, `sx.Completed(method, constraint)` wraps any other method the
-same way, so a subset of the residual's equations holds exactly.
+In implicit mode, `sx.Completed(method, constraint)` wraps any other [implicit
+method](implicit.md#the-form-of-the-fitted-map) the same way, so a subset of the
+residual's equations holds exactly.
 
 ## Automatic strategy selection
 
@@ -345,12 +348,13 @@ assert float(surrogate.report.value_max) < 1e-3
 ```
 
 For a polynomial form the choice goes further, through `recommend_fit`. The
-degree comes from the target's jaxpr, which `polynomial_degrees` walks while it
-propagates a degree per value, so a cubic reads as degree three and anything
-with `sin` or a division by an input reads as not a polynomial. When a curved
-output is not a polynomial, the degree is the lowest at which raising it no
-longer halves the held-out error, up to degree 6. The other settings come from
-three readings of the samples.
+degree comes from the target's jaxpr, the program that JAX records when it
+traces the function, which `polynomial_degrees` walks while it propagates a
+degree per value, so a cubic reads as degree three and anything with `sin` or a
+division by an input reads as not a polynomial. When a curved output is not a
+polynomial, the degree is the lowest at which raising it no longer halves the
+held-out error, up to degree 6. The other settings come from three readings of
+the samples.
 
 - An active-subspace reduction is added when the target has at least three
   continuous inputs and varies along fewer directions than that. The directions

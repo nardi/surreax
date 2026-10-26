@@ -39,8 +39,9 @@ $$
 $$
 
 where $\mathcal{F}$ is the set of functions that the [form](#form) allows. The
-[basic workflow](getting-started.md) page shows one. The projectile range is an
-example, since the range is a formula in the launch speed and angle.
+[basic workflow](getting-started.md) page shows one. The [projectile
+range](test-systems.md#projectile-range) is an example, since the range is a
+formula in the launch speed and angle.
 
 ### Implicit target
 
@@ -54,10 +55,11 @@ g(x, f(x)) = 0.
 $$
 
 Evaluating $f$ at one input means solving $m$ equations in $m$ unknowns. The
-temperature along a heated rod is an example. The input is the heater powers,
-the unknown is the temperature at every point, and the residual is the heat
-balance at every point. Where $\partial g / \partial y$ is nonsingular, the
-implicit function theorem says that $f$ exists locally and gives its derivative,
+temperature along a [heated rod](test-systems.md#heated-rod) is an example. The
+input is the heater powers, the unknown is the temperature at every point, and
+the residual is the heat balance at every point. Where $\partial g / \partial y$
+is nonsingular, the implicit function theorem says that $f$ exists locally and
+gives its derivative,
 
 $$
 \frac{\partial f}{\partial x}
@@ -453,12 +455,13 @@ $$
 z^\star(x) = \arg\min_z \lVert g(x, D(z)) \rVert^2.
 $$
 
-This is the least-squares Petrov-Galerkin projection. Training lowers the
-residual at $z^\star(x)$ over sampled inputs. It also trains $E$ so that
-$E(D(z)) = z$, and a small network, the `LatentGuess`, that predicts
-$z^\star(x)$ to start each solve. With `snapshots` at zero it only evaluates $g$
-forward and never solves a full state. A positive count solves that many full
-states and pretrains the decoder on them.
+This is the least-squares Petrov-Galerkin projection of [Carlberg and
+colleagues](https://arxiv.org/abs/2012.06073). Training lowers the residual at
+$z^\star(x)$ over sampled inputs. It also trains $E$ so that $E(D(z)) = z$, and
+a small network, the `LatentGuess`, that predicts $z^\star(x)$ to start each
+solve. With `snapshots` at zero it only evaluates $g$ forward and never solves a
+full state. A positive count solves that many full states and pretrains the
+decoder on them.
 
 ### Hyper-reduction
 

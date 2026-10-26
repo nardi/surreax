@@ -78,13 +78,16 @@ tests.
 
 `surreax` overlaps with several existing libraries but aims at a narrower goal.
 
-- SMT fits general surrogates in Python with a derivative emphasis, but it is
-  not built on JAX and does not fix the form of the result.
-- ALAMO builds surrogates so they can be used in algebraic optimization, but it
-  reaches tractability through sparsity rather than a chosen structural form.
-- OMLT turns already-trained models into optimization formulations, so it starts
-  where this library ends.
-- Physics-informed tools such as DeepXDE train a network to drive a residual to
-  zero by penalty. `fit_implicit` fits a surrogate of a chosen form to a
-  residual instead, and `fit_constrained` makes chosen equations hold exactly
-  rather than by penalty.
+- [SMT](https://github.com/SMTorg/smt) fits general surrogates in Python with a
+  derivative emphasis, but it is not built on JAX and does not fix the form of
+  the result.
+- [ALAMO](https://doi.org/10.1002/aic.14418) builds surrogates so they can be
+  used in algebraic optimization, but it reaches tractability through sparsity
+  rather than a chosen structural form.
+- [OMLT](https://arxiv.org/abs/2202.02414) turns already-trained models into
+  optimization formulations, so it starts where this library ends.
+- Physics-informed tools such as [DeepXDE](https://arxiv.org/abs/1907.04502)
+  train a network to drive a residual to zero by penalty.
+  [`fit_implicit`](implicit.md) fits a surrogate of a chosen form to a residual
+  instead, and [`fit_constrained`](techniques.md#equality-constraints) makes
+  chosen equations hold exactly rather than by penalty.

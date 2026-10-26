@@ -1,11 +1,19 @@
 # Implicit targets
 
 When you cannot write the target down, you may still have a residual `g(x, y)`
-and want `f` with `g(x, f(x))` near zero. `fit_implicit` fits such an `f`
-without a closed form for it. You pass it a `method` object that picks the
-strategy, and it returns a fitted surrogate. If you leave out the method,
-`fit_implicit` picks one from the residual, which needs an `unknown_domain` to
-draw unknowns from.
+and want `f` with `g(x, f(x))` near zero. The input `x` is a vector, the unknown
+`y` is a vector, and the residual is a vector of the same length as `y` that is
+zero when `y` solves the model for `x`. A discretized heat equation is an
+example, with a few heater powers as the input and the temperature at every
+point of a rod as the unknown.
+
+`fit_implicit` fits such an `f` without a closed form for it. You pass it a
+`method` object that picks the strategy, and it returns a fitted surrogate. If
+you leave out the method, `fit_implicit` picks one from the residual, which
+needs an `unknown_domain` to draw unknowns from. The residual takes the input as
+a flat array, so the input domain must be a `Box`. The [test
+systems](test-systems.md) page describes the physical residuals that the tests
+use, and several examples below are small versions of them.
 
 ## The form of the fitted map
 
@@ -18,8 +26,8 @@ picks one with `recommend_implicit_form`. A residual that is affine in the
 unknown gets an `Affine` form. Any other residual gets a `ChebyshevPolynomial`
 of degree 3 for an `InverseMap` and of degree 2 for an `ExactSolve` or a
 `ReducedSolve`. An `AutoencoderSolve` always gets degree 3, since its latent
-coordinates are learned. An `Objective` is the form it trains, so passing a
-form alongside it will raise an error.
+coordinates are learned. An `Objective` is the form it trains, so passing a form
+alongside it will raise an error.
 
 ## The inverse map
 
@@ -30,10 +38,10 @@ The `InverseMap` method inverts the residual in its second argument. Writing
 `h` is fitted as an ordinary regression over the augmented input `(x, r)`, and
 `f` reads it at the zero-residual slice with no root solve.
 
-A Newton step pulls the sampled unknowns near the solution manifold first, so
-the residuals cluster near zero where the slice is read. It is one linear solve
-per point, not an iterative solve. `InverseMap` carries the domain the unknown
-is drawn from and the Newton step count.
+Newton steps pull the sampled unknowns near the solution manifold first, so the
+residuals cluster near zero where the slice is read. Each step is one linear
+solve per point, and the default is one step. `InverseMap` carries the domain
+the unknown is drawn from and the Newton step count.
 
 ## An affine residual
 
@@ -94,10 +102,12 @@ residual with several solutions needs the branch handling of the next section.
 
 A residual can have several solution branches, and it can fold, at a point where
 its Jacobian in the unknown turns singular and no function of the input exists.
-The fit keeps one branch, chosen by the sign of `det(dg/dy)` at the most interior
-sample, so a two-branch residual is not averaged into a meaningless middle. The
-`fold` report says how much was dropped as off-branch, and flags a fold when the
-smallest determinant falls below the tolerance.
+The fit keeps one branch, chosen by the sign of `det(dg/dy)` at the sample where
+its magnitude is largest, which is the sample furthest from a fold. A two-branch
+residual is then not averaged into a meaningless middle. The `fold` report of
+the `InverseMap` result says how much was dropped as off-branch, and flags a
+fold when the smallest determinant falls below `fold_tolerance`, 1e-3 by
+default.
 
 Here `g(x, y) = y**2 - x` has two branches, `y = +sqrt(x)` and `y = -sqrt(x)`,
 and folds at `x = 0`.
@@ -126,17 +136,17 @@ assert bool(jnp.all(predictions > 0)) or bool(jnp.all(predictions < 0))
 assert float(surrogate.fold.off_branch) > 0.3
 ```
 
-Turning `continuation` on orders the samples along the first input coordinate and
-warm-starts each solve from the previous solution, which follows one branch even
-across a fold. It suits a residual whose branches meet, where independent solves
-from random starts would scatter across both.
+Turning `continuation` on orders the samples along the first input coordinate
+and warm-starts each solve from the previous solution, which follows one branch
+even across a fold. It suits a residual whose branches meet, where independent
+solves from random starts would scatter across both.
 
 ## Iterative refinement
 
 Any surrogate can polish each prediction with a few Newton steps on the
-residual, so a cheap solve from the surrogate's guess drives `g(x, f(x))` to zero
-at call time. Set `refine_steps` on `fit_implicit` to turn it on, and it wraps
-whatever the method produced.
+residual, so a cheap solve from the surrogate's guess drives `g(x, f(x))` to
+zero at call time. Set `refine_steps` on `fit_implicit` to turn it on, and it
+wraps whatever the method produced.
 
 <!-- name: test_implicit_refinement -->
 ```python
@@ -183,47 +193,29 @@ assert float(jnp.abs(residual(point, solver(point))[0])) < 1e-5
 
 ## Pairs instead of a callable
 
-When you already hold input-output pairs rather than a callable, `fit_data`
-fits a linear form to them directly. It normalizes from the sample moments,
-since the pairs carry no domain box, and reports the held-out prediction error.
-Its domain comes from the data through `domain_from_data`, so the surrogate's
-`coverage` tells a query near the data from one in an empty part of the box.
-The inverse map uses it internally, and it is useful on its own for a distilled
-dataset.
-
-<!-- name: test_implicit_fit_data -->
-```python
-import jax
-import jax.numpy as jnp
-import surreax as sx
-
-key = jax.random.key(0)
-inputs = jax.random.uniform(key, (200, 3), minval=-1.0, maxval=1.0)
-weights = jnp.array([[1.0, -2.0, 0.5], [0.0, 1.0, 3.0]])
-outputs = jax.vmap(lambda x: weights @ x + jnp.array([0.5, -1.0]))(inputs)
-
-surrogate = sx.fit_data(inputs, outputs, sx.Affine())
-assert float(surrogate.report.value_max) < 1e-3
-```
+The inverse map fits its regression with `fit_data`, which fits a linear form to
+input-output pairs and needs no callable. The [basic
+workflow](getting-started.md#input-output-pairs) page describes it.
 
 ## Large sparse systems
 
 When the input is small but the unknown is large, a physical model discretized
 over many states, the `ExactSolve` method fits `f` at a scale the inverse map
-cannot reach. That works because the residual Jacobian in the unknown is
-sparse, so the Newton solve is cheap when the sparsity is used, and because `f`
-maps a small input to a large unknown, so the solved unknowns trace a manifold no
-wider than the input. `ExactSolve` solves `g = 0` at each sample, collapses the
-solved unknowns onto their leading principal directions, and fits the map into
-that small reduced space.
+cannot reach. That works because the residual Jacobian in the unknown is sparse,
+so the Newton solve is cheap when the sparsity is used, and because `f` maps a
+small input to a large unknown, so the solved unknowns trace a manifold no wider
+than the input. `ExactSolve` solves `g = 0` at each sample, collapses the solved
+unknowns onto their leading principal directions, and fits the map into that
+small reduced space.
 
 Each Newton step factors the sparse Jacobian by default.
 [asdex](https://github.com/adrhill/asdex) reads the sparsity pattern from the
 residual and colors it, so the Jacobian costs one Jacobian-vector product per
 color. [splineax](https://github.com/nardi/splineax) then factors it with a
-sparse direct solver. A `StencilResidual` states its pattern in its stencil
-table, so it skips the tracing. The solve cost follows the number of nonzeros,
-not the square of the state size.
+sparse direct solver. A `StencilResidual`, described under
+[hyper-reduction](#hyper-reduction), states its pattern in its stencil table, so
+it skips the tracing. The solve cost follows the number of nonzeros, not the
+square of the state size.
 
 Here the unknown is a field of 64 states coupled by a nearest-neighbor
 Laplacian, driven by three inputs, so the solution lives on a rank-3 manifold.
@@ -259,23 +251,24 @@ sets how a Newton step solves its Jacobian system.
 
 - `"sparse"`, the default, factors the sparse Jacobian. When the residual has no
   usable pattern, because asdex cannot read one of its operations or the pattern
-  is close to dense, it falls back to `"matrix_free"`. `residual_pattern` returns
-  the pattern it would use, or None.
+  is close to dense, it falls back to `"matrix_free"`. `residual_pattern`
+  returns the pattern it would use, or None.
 - `"matrix_free"` finds the step by GMRES from Jacobian-vector products alone,
   through [lineax](https://arxiv.org/abs/2311.17283), and never forms the
   Jacobian. It is the route when even a sparse factorization does not fit in
   memory.
 - `"dense"` forms the full Jacobian, which suits a small unknown.
 
-`recommend_linear_solver` picks one from the residual, and `recommend_method` sets
-it on the `ExactSolve` it returns.
+`recommend_linear_solver` picks one from the residual, and `recommend_method`
+sets it on the `ExactSolve` it returns.
 
 ### Precision
 
 The direct solver follows the JAX precision you set, and `surreax` never changes
 the JAX configuration. On CPU with x64 enabled it is KLU, which reuses the
-symbolic analysis and the pivot order from one Newton step to the next. Without
-x64 it is `Spsolve`, which solves in single precision and factors every step from
+symbolic analysis and the pivot order from one Newton step to the next. It is
+Pardiso instead when the splineax `pardiso` extra is installed. Without x64 it
+is `Spsolve`, which solves in single precision and factors every step from
 scratch. A large implicit fit on CPU should turn x64 on at startup with
 `jax.config.update("jax_enable_x64", True)`. On a CUDA GPU with the splineax
 `cudss` extra installed it is cuDSS, in either precision.
@@ -283,36 +276,40 @@ scratch. A large implicit fit on CPU should turn x64 on at startup with
 A `reuse` setting, a `splineax.HybridSettings`, keeps the factorization of an
 earlier Newton step as the preconditioner of an iterative solve and only factors
 again when that solve is slow. It only pays off where a factorization is
-expensive next to a solve, which is a 3D grid. In the benchmarks it took about
-five times as long as refactoring on 2D plates of 64, 128 and 256 points a side,
-but 0.85 times as long on a 16 by 16 by 16 block and 0.58 times on a 24 by 24 by
-24 block, since the factorization of a 3D grid fills in far more. It is off by
-default.
+expensive next to a solve, which is a 3D grid. In timings on the radiating plate
+and block systems, the reuse took about five times as long as refactoring on 2D
+plates of 64, 128 and 256 points a side, but 0.85 times as long on a 16 by 16 by
+16 block and 0.58 times on a 24 by 24 by 24 block, since the factorization of a
+3D grid fills in far more. Those timings come from one CPU and will differ on
+yours. The benchmark `test_benchmark_newton_solve_against_linear_solver` repeats
+the comparison on a plate of 64 points a side and a block of 16, and the [test
+systems](test-systems.md#radiating-plate-and-block) page describes both. The
+setting is off by default.
 
 ### Derivative supervision
 
 A positive `derivative_weight` on `ExactSolve` also fits the Jacobian of the
 reduced coefficients in the input. The implicit function theorem gives it from
-one transposed solve per coefficient at each solved sample, reusing the solver of
-the Newton steps, so the full Jacobian of the unknown is never formed.
+one transposed solve per coefficient at each solved sample, reusing the solver
+of the Newton steps, so the full Jacobian of the unknown is never formed.
 
 ### Convergence of the Newton solves
 
-Newton diverges from a start far from a root of a stiff residual, such as one with
-exponentials. The basis and the fit then use states that are not roots, and nothing
-else shows it. `ExactSolve`, `ReducedSolve` and `AutoencoderSolve` therefore check
-every full solve and raise an error if one did not converge. A solve has converged
-when its residual norm is at most `convergence_tolerance` times the residual norm
-at the zero state, which is 1e-3 by default. The check also runs under `jit`,
-through `equinox.error_if`.
+Newton diverges from a start far from a root of a stiff residual, such as one
+with exponentials. The basis and the fit then use states that are not roots, and
+nothing else shows it. `ExactSolve`, `ReducedSolve` and `AutoencoderSolve`
+therefore check every full solve and raise an error if one did not converge. A
+solve has converged when its residual norm is at most `convergence_tolerance`
+times the residual norm at the zero state, which is 1e-3 by default. The check
+also runs under `jit`, through `equinox.error_if`.
 
 The reference is the zero state and not the start of the solve. The residual at
-a far start can be astronomically large, so a ratio to it would pass a solve that
-is still far from a root.
+a far start can be astronomically large, so a ratio to it would pass a solve
+that is still far from a root.
 
-A smaller `unknown_domain` or more `newton_steps` fixes most failures. Near a fold,
-Newton converges only linearly, and a deliberately ill-conditioned system may need
-`convergence_tolerance=None` to skip the check.
+A smaller `unknown_domain` or more `newton_steps` fixes most failures. Near a
+fold, Newton converges only linearly, and a deliberately ill-conditioned system
+may need `convergence_tolerance=None` to skip the check.
 
 ## The reduced-order model
 
@@ -330,14 +327,18 @@ This is the non-intrusive reduced-order model, POD-NN, of Hesthaven and Ubbiali,
 `reduced_solver` builds the solver without a surrogate, so it takes no form.
 
 The basis is linear here, which suits a solution manifold whose Kolmogorov
-n-width decays fast. A strongly curved manifold needs the learned manifold of a
-later section. The latent dimension is the `rank`, and the residual falls as it
+n-width decays fast. The n-width measures how well `n` linear modes can
+approximate the set of all solutions, and it decays fast when a few modes
+suffice. A strongly curved manifold needs the learned manifold of a later
+section. The latent dimension is the `rank`, and the residual falls as it
 reaches the intrinsic dimension of the manifold.
 
 With `greedy` set, the method chooses the snapshots one at a time where the
 current basis leaves the most residual, rather than taking the first `snapshots`
-samples, so it reaches a given accuracy with fewer full solves. It helps most when the hard
-states sit in a small part of the input space that uniform sampling underweights.
+samples, so it reaches a given accuracy with fewer full solves. A
+`snapshot_tolerance` above zero stops the selection once the largest leftover
+residual falls below it. It helps most when the hard states sit in a small part
+of the input space that uniform sampling underweights.
 
 <!-- name: test_implicit_reduced_order -->
 ```python
@@ -364,12 +365,12 @@ assert float(surrogate.report.value_mean) < 1e-3
 
 ### The reduced solver on its own
 
-`reduced_solver` returns the solver rather than the distilled map, so you have the
-cheap latent solve and its exact input derivative without a fit. The derivative
-comes through the implicit function theorem, not by differentiating the Newton
-steps, so it is exact and cheap. The solver's `report` says where the reduced
-problem is ill-conditioned or has several latent roots, so an untrustworthy solve
-is flagged rather than returned in silence.
+`reduced_solver` returns the solver rather than the distilled map, so you have
+the cheap latent solve and its exact input derivative without a fit. The
+derivative comes through the implicit function theorem, not by differentiating
+the Newton steps, so it is exact and cheap. The solver's `report` says where the
+reduced problem is ill-conditioned or has several latent roots, so an
+untrustworthy solve is flagged rather than returned in silence.
 
 <!-- name: test_implicit_reduced_solver -->
 ```python
@@ -406,18 +407,18 @@ even those are too expensive, `AutoencoderSolve` learns the manifold from the
 residual alone. A decoder maps a small latent to the full state, and the reduced
 solve picks the latent whose decoded state leaves the least residual, by
 Gauss-Newton on `||g(x, D(z))||`. That is the least-squares Petrov-Galerkin
-projection of Carlberg and colleagues,
-[LSPG](https://arxiv.org/abs/2012.06073). Training samples inputs,
-reduce-solves them, and lowers the residual the decoded states leave, with the
-derivative through the inner solve taken by the implicit function theorem. It
-only ever evaluates `g` forward, so no full state is solved.
+projection of Carlberg and colleagues, [LSPG](https://arxiv.org/abs/2012.06073).
+Training samples inputs, reduce-solves them, and lowers the residual the decoded
+states leave, with the derivative through the inner solve taken by the implicit
+function theorem. By default it only evaluates `g` forward, so no full state is
+solved.
 
 An encoder is trained next to the decoder so that `E(D(z)) = z`, which lets you
 map a known state back into the latent. The decoder is nonlinear, so it can
 follow a manifold that bends, in the manner of Lee and Carlberg,
-[nonlinear-manifold ROMs](https://doi.org/10.1016/j.jcp.2019.108973). The price is
-that the result is no longer a linear program, and the training is slower than a
-closed-form fit.
+[nonlinear-manifold ROMs](https://doi.org/10.1016/j.jcp.2019.108973). The price
+is that the result is no longer a linear program, and the training is slower
+than a closed-form fit.
 
 `autoencoder_solver` returns the trained solver on its own. `fit_implicit`
 distills it with the `form` it receives into a `DecodedSurrogate` that predicts
@@ -450,20 +451,20 @@ assert solver(jnp.array([0.4, -0.2])).shape == (32,)
 
 ### A moving front and the limit of the linear basis
 
-Some manifolds are hard to reach from the residual alone. Picture fluid in a pipe
-flowing past a heater you can slide along it. The fluid is cold before the heater
-and warm after it, so the solution is a sharp step whose position follows the
-heater. Two numbers, the heater position and the flow rate, fix the state, but a
-linear basis needs about one mode per step position. On 64 points, eight linear
-modes still leave most of the residual.
+Some manifolds are hard to reach from the residual alone. Picture fluid in a
+pipe flowing past a heater you can slide along it. The fluid is cold before the
+heater and warm after it, so the solution is a sharp step whose position follows
+the heater. Two numbers, the heater position and the flow rate, fix the state,
+but a linear basis needs about one mode per step position. On 64 points, eight
+linear modes still leave most of the residual.
 
 Training from a random start does not find that step. With `snapshots` set, the
-method solves that many full states first. The autoencoder starts from their linear basis and
-is trained to reconstruct them, then the residual training refines it. With 16
-snapshots, a rank-2 learned manifold leaves about a third of the residual that
-eight linear modes leave. A sharp feature also gives the latent solve local
-minima, so every solve starts from a small learned network, the `LatentGuess`,
-that predicts where the solve ends up.
+method solves that many full states first. The autoencoder starts from their
+linear basis and is trained to reconstruct them, then the residual training
+refines it. With 16 snapshots, a rank-2 learned manifold leaves about a third of
+the residual that eight linear modes leave. A sharp feature also gives the
+latent solve local minima, so every solve starts from a small learned network,
+the `LatentGuess`, that predicts where the solve ends up.
 
 `recommend_reduced_method` makes the choice for you. It solves the snapshots a
 `ReducedSolve` asks for and reads how much of their variation its rank captures,
@@ -493,11 +494,11 @@ assert sx.recommend_reduced_method(residual, domain, method) is method
 
 ## Hyper-reduction
 
-A reduced solve works in a small latent, but each Newton step still evaluates the
-whole residual, so its cost grows with the state. `hyper_reduce` removes that
-cost. It takes residual snapshots near the manifold, keeps a small residual basis, and
-picks a few residual entries from which that basis can be recovered, by the
-discrete empirical interpolation method of Chaturantabut and Sorensen,
+A reduced solve works in a small latent, but each Newton step still evaluates
+the whole residual, so its cost grows with the state. `hyper_reduce` removes
+that cost. It takes residual snapshots near the manifold, keeps a small residual
+basis, and picks a few residual entries from which that basis can be recovered,
+by the discrete empirical interpolation method of Chaturantabut and Sorensen,
 [DEIM](https://doi.org/10.1137/090766498). The latent solve then minimizes the
 residual rebuilt from those entries alone, the GNAT method of Carlberg and
 colleagues, [GNAT](https://doi.org/10.1016/j.jcp.2013.02.028).
@@ -509,8 +510,8 @@ The hyper-reduced solve then decodes the state on those neighbors and nothing
 else. It reads the same number of state entries whatever the size of the state,
 and it works under both the linear solver and the learned-manifold one.
 
-Here a rod radiates heat only at three bare patches, so the nonlinear part of its
-residual lives on a few points, and the chosen entries gather there.
+Here a rod radiates heat only at three bare patches, so the nonlinear part of
+its residual lives on a few points, and the chosen entries gather there.
 
 <!-- name: test_implicit_hyper_reduction -->
 ```python
@@ -548,16 +549,17 @@ assert hyper(jnp.full(4, 0.5)).shape == (points,)
 unchanged when the residual is not a `StencilResidual`, or when the sampled
 stencils would read more than half the state. Otherwise it hyper-reduces and
 checks the result on held-out inputs. It keeps the hyper-reduced solver only if
-the residual it leaves is at most `tolerance` times that of the full solver,
-1.2 by default.
+the residual it leaves is at most `tolerance` times that of the full solver, 1.2
+by default.
 
 ## Equations that hold exactly
 
 The methods above leave every equation of the residual approximately satisfied.
 `sx.Completed(method, constraint)` wraps any of them so that a chosen subset of
 the equations holds to solver precision, by solving the outputs those equations
-determine at call time. The [equality constraints](techniques.md#equality-constraints)
-section describes the completion.
+determine at call time. The [equality
+constraints](techniques.md#equality-constraints) section describes the
+completion.
 
 ## The objective route
 

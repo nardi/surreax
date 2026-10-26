@@ -14,9 +14,11 @@ flatten -> encode -> normalize -> model -> denormalize -> decode -> unflatten
 The flatten stage is the domain's `flatten`, which also maps a log-scaled or
 categorical input to its flat coordinates. Every stage is stored with the fitted
 object, not run as a separate preprocessing step you have to remember. The
-encode and decode stages are linear maps. Composing a linear map with a piecewise linear or convex model
-keeps that structure in the original coordinates, which is why the reduction is
-linear rather than a general encoder.
+encode and decode stages are linear maps. Composing a linear map with a
+piecewise linear or convex model keeps that structure in the original
+coordinates, which is why the reduction is linear rather than a general encoder.
+The `export` function relies on this when it folds the stages into the exported
+arrays.
 
 ## Structural typing
 
@@ -30,8 +32,9 @@ The library leans on protocols rather than base classes.
    because Equinox needs it to register a pytree. Those modules are data
    containers, so behavior stays in free functions and small protocols.
 
-The library relies on structural typing, so all library code is fully typed,
-and jaxtyping with beartype checks array shapes at runtime during tests.
+All library code is fully typed. The protocols give the type checker the
+interfaces, and jaxtyping with beartype checks array shapes at runtime during
+tests.
 
 ## Code layout
 
@@ -47,8 +50,9 @@ and jaxtyping with beartype checks array shapes at runtime during tests.
   degrees from the jaxpr. `error_search` holds the worst-case search, and
   `completion` the equality constraints.
 - `implicit` holds `fit_implicit` and its methods. `sparse_solve` holds the
-  sparse direct Newton step, `autoencoder` the learned manifold, `hyperreduction`
-  the sampled latent solve, and `stencil` the entry-wise residual.
+  sparse direct Newton step, `autoencoder` the learned manifold,
+  `hyperreduction` the sampled latent solve, and `stencil` the entry-wise
+  residual.
 - The common names re-export from the top-level `surreax` package.
 
 ## Style
@@ -61,10 +65,10 @@ and jaxtyping with beartype checks array shapes at runtime during tests.
   surrogate on a test system, or combines several modules. The directories carry
   the markers `unit`, `integration` and `benchmark`, so `pytest -m unit` and
   `pytest tests/unit` select the same tests. The shared test systems stay in
-  `tests/`.
+  `tests/`, and the [test systems](test-systems.md) page describes them.
 - A test that takes about ten seconds or more carries the `slow` marker. The
-  command `pytest tests/unit -m "not slow"` is the quick check, and it skips
-  the 50 slowest unit tests.
+  command `pytest tests/unit -m "not slow"` is the quick check, and it skips the
+  50 slowest unit tests.
 - The benchmarks build and fit their systems before they time anything, so the
   directory takes several minutes. `pytest -m "not benchmark"` skips it.
 - Every code example on this site is executed by markdown-pytest in CI, so an
@@ -78,9 +82,9 @@ and jaxtyping with beartype checks array shapes at runtime during tests.
   not built on JAX and does not fix the form of the result.
 - ALAMO builds surrogates so they can be used in algebraic optimization, but it
   reaches tractability through sparsity rather than a chosen structural form.
-- OMLT turns already-trained models into optimization formulations, so it
-  starts where this library ends.
+- OMLT turns already-trained models into optimization formulations, so it starts
+  where this library ends.
 - Physics-informed tools such as DeepXDE train a network to drive a residual to
-  zero by penalty. `fit_implicit` fits a surrogate of a chosen form to a residual
-  instead, and `fit_constrained` makes chosen equations hold exactly rather than
-  by penalty.
+  zero by penalty. `fit_implicit` fits a surrogate of a chosen form to a
+  residual instead, and `fit_constrained` makes chosen equations hold exactly
+  rather than by penalty.

@@ -2,8 +2,8 @@
 
 `surreax` fits a surrogate to a function written in JAX. You give it the
 function and a region where the surrogate should be accurate, and it returns a
-second function that behaves approximately like the first one but has a form
-you chose in advance, such as affine, polynomial, or piecewise linear.
+second function that behaves approximately like the first one but has a form you
+chose in advance, such as affine, polynomial, or piecewise linear.
 
 The point of fixing the form up front is that some forms are easy to reason
 about later. A piecewise linear surrogate can be handed to a mixed-integer
@@ -11,7 +11,14 @@ solver. A convex surrogate can be minimized reliably. A general neural network
 can do neither. `surreax` treats the form as the thing you care about, and
 accuracy as the thing to maximize once the form is fixed.
 
+`surreax` fits two kinds of target. An explicit target is a function you can
+call, such as a simulation written in JAX. An implicit target is a residual
+`g(x, y)` that is zero when `y` solves the model for the input `x`, such as a
+discretized heat equation, and the surrogate is the map from `x` to `y`.
+
 ## Installation
+
+`surreax` needs Python 3.11 or newer.
 
 ```bash
 pip install surreax
@@ -64,11 +71,25 @@ than most of them, which leads to a few different choices:
 2. It cares about the *form* of the result, not only its accuracy. The fitted
    object keeps the structure you asked for, so a downstream solver can use it.
 3. It fits in closed form wherever the form allows. The affine and polynomial
-   forms are one linear solve, with no learning rate and a deterministic
-   answer.
+   forms are one linear solve, with no learning rate and a deterministic answer.
 4. It reports error by source, splitting the value error from the derivative
    error, because a surrogate can match values well and derivatives badly.
 
-The [development notes](development.md) compare `surreax` with SMT, ALAMO,
-OMLT, and the physics-informed tools.
-```
+The [development notes](development.md) compare `surreax` with SMT, ALAMO, OMLT,
+and the physics-informed tools.
+
+## Where to next
+
+- [The basic workflow](getting-started.md) walks through a fit, the domain
+  types, and the error report.
+- [Model forms](forms.md) describes each form, how it is fitted, and what a
+  solver can do with it.
+- [Fitting techniques](techniques.md) covers derivative supervision, dimension
+  reduction, sparse bases, adaptive sampling, separable targets, equality
+  constraints, and automatic settings.
+- [Implicit targets](implicit.md) covers `fit_implicit`, the methods for large
+  sparse systems, and the reduced-order models.
+- [Test systems](test-systems.md) describes the physical systems that the test
+  suite fits, with their equations and the code that builds them.
+- [Development](development.md) describes the layout of the code and how the
+  tests are organized.

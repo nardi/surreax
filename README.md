@@ -58,8 +58,8 @@ Good surrogate libraries exist already, so `surreax` aims at a narrower goal,
 which leads to a few different choices:
 
 1. It is built on JAX, so the target's exact Jacobian is available and cheap.
-2. It cares about the form of the result, not only its accuracy, so a
-   downstream solver can use the structure it keeps.
+2. It cares about the form of the result, not only its accuracy, so a downstream
+   solver can use the structure it keeps.
 3. It fits in closed form wherever the form allows, with no learning rate and a
    deterministic answer.
 4. It reports error by source, splitting value error from derivative error.
@@ -67,19 +67,20 @@ which leads to a few different choices:
 ## Status
 
 `surreax` fits explicit targets with the affine, Chebyshev polynomial, convex
-max-affine, difference-of-max-affine, grid, and feedforward network forms. Two ReLU
-network forms, an input-convex one and a general one, are piecewise linear too.
-The piecewise linear forms export as arrays for a solver. A domain can mix boxes
-with log-scaled, normal, integer, and categorical inputs, or be inferred from a
-dataset, in which case the surrogate reports how far a query lies from the data.
+max-affine, difference-of-max-affine, grid, and feedforward network forms. Two
+ReLU network forms, an input-convex one and a general one, are piecewise linear
+too. The piecewise linear forms export as arrays for a solver. A domain can mix
+boxes with log-scaled, normal, integer, and categorical inputs, or be inferred
+from a dataset, in which case the surrogate reports how far a query lies from
+the data.
 
 A fit can train against target derivatives and work in a reduced space, found by
 PCA, an active subspace, or exact pruning. It can select a sparse basis by
 matching pursuit, split a separable target into blocks, add samples where it is
 worst, and hold an equality constraint exactly. If you leave out the form, `fit`
-picks the form, its polynomial degree, the reductions, and the sparse budget from
-the target itself. The report separates value, derivative, and projection error,
-searches the worst case over the domain, and gives the structure cost.
+picks the form, its polynomial degree, the reductions, and the sparse budget
+from the target itself. The report separates value, derivative, and projection
+error, searches the worst case over the domain, and gives the structure cost.
 
 It also fits implicit targets given as a residual `g(x, y)`. The methods are the
 inverse map, a direct sparse Newton solve with output reduction, a linear
@@ -95,8 +96,8 @@ code example in the documentation is executed by markdown-pytest.
 ## Testing
 
 As this is a model fitting library, tests may take a significant time to run.
-The recommended way to validate new code is to start with the quickest tests
-and work outward.
+The recommended way to validate new code is to start with the quickest tests and
+work outward.
 
 ```bash
 # While editing: the unit tests, without the slow ones.
@@ -112,7 +113,9 @@ uv run pytest tests/integration docs README.md
 The tests sit in `tests/unit`, `tests/integration` and `tests/benchmarks`, and
 each directory has a matching marker. A test that takes about ten seconds or
 more also carries the `slow` marker. The benchmarks fit their systems before
-they time anything, so `-m "not benchmark"` skips them.
+they time anything, so `-m "not benchmark"` skips them. The [test
+systems](https://nardi.github.io/surreax/test-systems/) page describes the
+physical systems that the integration tests fit.
 
 The full run with branch coverage, `uv run pytest --cov --cov-branch`, took
 about 50 minutes in one measured run. CI runs it and enforces the 100% coverage

@@ -1,0 +1,77 @@
+/* Line drawings on the test systems page. The strokes follow the text color, so they stay readable in both color schemes. */
+.schematic {
+  margin: 1.2em auto;
+  text-align: center;
+}
+
+.schematic svg {
+  max-width: 100%;
+  height: auto;
+  color: var(--md-default-fg-color);
+}
+
+.schematic .line {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.schematic .thin {
+  stroke-width: 1;
+}
+
+.schematic .dash {
+  stroke-dasharray: 4 3;
+}
+
+.schematic .node {
+  fill: var(--md-default-bg-color);
+  stroke: currentColor;
+  stroke-width: 1.5;
+}
+
+.schematic .accent {
+  fill: none;
+  stroke: var(--md-accent-fg-color);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.schematic .accent-node {
+  fill: var(--md-accent-fg-color);
+  stroke: none;
+}
+
+.schematic .soft {
+  fill: currentColor;
+  fill-opacity: 0.08;
+  stroke: none;
+}
+
+.schematic .solid {
+  fill: currentColor;
+  stroke: none;
+}
+
+.schematic text {
+  fill: currentColor;
+  font-size: 13px;
+  font-family: var(--md-text-font-family, sans-serif);
+}
+
+.schematic text.small {
+  font-size: 11px;
+}
+
+.schematic text.accent-text {
+  fill: var(--md-accent-fg-color);
+}
+
+.schematic figcaption {
+  margin-top: 0.4em;
+  font-size: 0.75rem;
+  opacity: 0.8;
+}

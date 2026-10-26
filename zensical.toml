@@ -12,8 +12,15 @@ nav = [
   { "Model forms" = "forms.md" },
   { "Fitting techniques" = "techniques.md" },
   { "Implicit targets" = "implicit.md" },
+  { "Test systems" = "test-systems.md" },
   { "Development" = "development.md" },
 ]
+
+extra_javascript = [
+  "javascripts/mathjax.js",
+  "https://unpkg.com/mathjax@3.2.2/es5/tex-mml-chtml.js",
+]
+extra_css = ["stylesheets/schematic.css"]
 
 [project.theme]
 language = "en"

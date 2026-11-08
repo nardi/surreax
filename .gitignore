@@ -19,6 +19,7 @@ htmlcov/
 
 # Docs build
 site/
+.cache/
 
 # Editor
 .claude/

@@ -327,17 +327,17 @@ original coordinates.
 ## Solver export
 
 The point of a piecewise linear form is that a solver can reason about it. A
-max-affine surrogate is a maximum of affine pieces, so it can be encoded with
-linear constraints, and each part of a difference of two is encoded the same
-way. `export` returns the slopes and intercepts as plain arrays, in the domain's
-flat coordinates, so you can write the encoding in whatever optimization
-framework you use. For the network forms, `export` returns the layer matrices
-the same way. For a box the flat coordinates are the inputs themselves, and for
-a `LogRange` input the coordinate is its logarithm. The
-[terminology](terminology.md#flat-coordinates) page defines the flat
-coordinates. `export` includes the input and output normalization in the arrays,
-so the arrays act on the original input and produce the original output. It
-needs an identity output reduction, because a reduced output space mixes the
+max-affine surrogate is a maximum of affine pieces, so it can be written as one
+linear inequality per piece, and both parts of a difference of two such
+surrogates can be written in the same way. `export` returns the slopes and
+intercepts as plain arrays, in the domain's flat coordinates, so you can write
+the encoding in whatever optimization framework you use. For the network forms,
+`export` returns the layer matrices the same way. For a box the flat coordinates
+are the inputs themselves, and for a `LogRange` input the coordinate is its
+logarithm. The [terminology](terminology.md#flat-coordinates) page defines the
+flat coordinates. `export` includes the input and output normalization in the
+arrays, so the arrays act on the original input and produce the original output.
+It needs an identity output reduction, because a reduced output space mixes the
 outputs, and it raises an error otherwise.
 
 `export` returns only arrays, so `surreax` does not depend on a solver. For

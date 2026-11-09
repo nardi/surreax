@@ -68,8 +68,8 @@ tests.
   test systems are in `tests/`, and the [test systems](test-systems.md) page
   describes them.
 - A test that takes about ten seconds or more has the `slow` marker. The command
-  `pytest tests/unit -m "not slow"` is the quick check, and it deselects the 50
-  slowest unit tests.
+  `pytest tests/unit -m "not slow"` is the quick check, and it deselects the
+  unit tests with that marker.
 - Each benchmark builds and fits its system before the timed part, so the
   directory takes several minutes to run. `pytest -m "not benchmark"` deselects
   it.
@@ -87,7 +87,8 @@ tests.
   used in algebraic optimization, but it makes the surrogates tractable through
   sparsity rather than through a chosen structural form.
 - [OMLT](https://arxiv.org/abs/2202.02414) converts trained models to
-  optimization formulations, so it is the step after this library.
+  optimization formulations, which is the step after a surrogate is fitted with
+  this library.
 - Physics-informed tools such as [DeepXDE](https://arxiv.org/abs/1907.04502)
   train a network with the residual as a penalty term in the loss.
   [`fit_implicit`](implicit.md) fits a surrogate of a chosen form to a residual

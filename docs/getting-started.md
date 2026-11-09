@@ -168,7 +168,8 @@ why the two errors are reported separately. The worst case is zero when you pass
 
 ## The surrogate as a function
 
-The surrogate has the target's signature and is called the same way.
+The surrogate has the target's signature, so it is called with the same
+arguments.
 
 <!-- name: test_start_target -->
 ```python

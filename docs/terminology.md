@@ -48,7 +48,7 @@ formula in the launch speed and angle.
 A function $f : \mathbb{R}^n \to \mathbb{R}^m$ that has no formula and is only
 defined by a [residual](#residual). The residual
 $g : \mathbb{R}^n \times \mathbb{R}^m \to \mathbb{R}^m$ is zero exactly when $y$
-is the answer for the input $x$,
+is the solution for the input $x$,
 
 $$
 g(x, f(x)) = 0.
@@ -76,30 +76,30 @@ it is a fixed feed-forward computation $\hat y = \hat f(x)$ with no equation to
 solve. It is implicit, or solve-at-call, when evaluating it still solves an
 equation.
 
-Every fit of an explicit target gives an explicit surrogate. For an implicit
+Every fit of an explicit target returns an explicit surrogate. For an implicit
 target, `InverseMap`, `ExactSolve`, `Objective`, and the distilled form of
-`ReducedSolve` and `AutoencoderSolve` also give explicit surrogates, because
+`ReducedSolve` and `AutoencoderSolve` also return explicit surrogates, because
 they replace the solve by a regression. The class names can mislead here. An
 `ImplicitSurrogate` is the explicit result of `InverseMap`, named for the kind
 of target that it approximates.
 
 The solve-at-call objects are `reduced_solver`, `autoencoder_solver`,
 `hyper_reduce`, `refine`, `root_find`, and a `CompletedSurrogate`. Each one runs
-a few Newton or Gauss-Newton steps at every call. They usually leave a smaller
-residual than a regression does, and the reduced, learned-manifold and completed
-ones differentiate exactly through the implicit function theorem. They cost a
-solve per call, and they have no fixed form that an optimization solver can
-encode. An explicit surrogate has a form, and a piecewise linear one
-[exports](#export) to arrays.
+a few Newton or Gauss-Newton steps at every call. Their residual is usually
+smaller than that of a regression, and the derivatives of the reduced,
+learned-manifold and completed ones are exact, from the implicit function
+theorem. Each call includes a solve, and they have no fixed form that an
+optimization solver can encode. An explicit surrogate has a form, and a
+piecewise linear one can be [exported](#export) to arrays.
 
 ### Domain
 
 The region $\mathcal{D}$ where the surrogate should be accurate, together with
 the distribution that samples are drawn from. A `Box` is
-$\mathcal{D} = \prod_j [l_j, u_j]$, and other leaves sample on a logarithmic
-scale, from a truncated normal law, over integers, or over a set of options. A
-fit never promises accuracy outside the domain. See [the
-domain](getting-started.md#the-domain).
+$\mathcal{D} = \prod_j [l_j, u_j]$, and other leaf domains are sampled on a
+logarithmic scale, from a truncated normal distribution, over integers, or over
+a set of options. The accuracy of a fit outside the domain is not controlled.
+See [the domain](getting-started.md#the-domain).
 
 ### Flat coordinates
 
@@ -110,11 +110,11 @@ vector with one entry per option. The fit, the reductions, and the
 
 ### Form
 
-The shape that the surrogate may take, such as affine, a polynomial of a given
-degree, or a maximum of affine pieces. A form fixes the set $\mathcal{F}$ in the
-fit above. Choosing the form is the main decision in a fit, since it sets how
-accurate the result can be and what a downstream tool can do with it. See [model
-forms](forms.md).
+The kind of function that the surrogate may be, such as affine, a polynomial of
+a given degree, or a maximum of affine pieces. A form fixes the set
+$\mathcal{F}$ in the fit above. Choosing the form is the main decision in a fit,
+since it determines how accurate the result can be and what a downstream tool
+can do with it. See [model forms](forms.md).
 
 ### Linear form
 
@@ -138,22 +138,21 @@ not linear in their parameters and are fitted by iteration.
 ### Method
 
 The strategy that `fit_implicit` uses, such as `InverseMap` or `ExactSolve`. A
-method says how to turn a residual into training data and what to train. The
-form is separate. It is the linear form that the method fits to its data, for
-example the map from the input to the reduced coordinates.
+method determines how training data is computed from the residual and what is
+trained. The form is a separate argument, the linear form that the method fits
+to its data, for example the map from the input to the reduced coordinates.
 
 ### Structure cost
 
 The report's count of the parts that the model is built from. It is the number
 of nonzero basis terms of a linear form, the number of affine pieces of a
-max-affine form, and the parameter count of a network. A larger cost buys
-accuracy and makes the surrogate harder to reason about.
+max-affine form, and the parameter count of a network. A larger cost allows a
+higher accuracy and makes the surrogate harder to reason about.
 
 ## Error measures
 
-All errors are measured on held-out samples that did not take part in the fit.
-The [report](getting-started.md#the-report) has one mean and one maximum of
-each.
+All errors are measured on held-out samples that are not used in the fit. The
+[report](getting-started.md#the-report) has one mean and one maximum of each.
 
 ### Value error
 
@@ -164,7 +163,7 @@ e_v(x) = \lVert \hat f(x) - f(x) \rVert_2.
 $$
 
 For an implicit target the true $f$ is not available, so the report measures the
-residual that the surrogate leaves instead,
+residual at the surrogate's prediction instead,
 $e_v(x) = \lVert g(x, \hat f(x)) \rVert_2$.
 
 ### Derivative error
@@ -172,12 +171,12 @@ $e_v(x) = \lVert g(x, \hat f(x)) \rVert_2$.
 The distance between the Jacobians,
 $e_d(x) = \lVert \partial \hat f / \partial x - \partial f / \partial x \rVert_F$.
 A surrogate can match values well and derivatives badly. A downstream optimizer
-uses the derivatives, so the report keeps the two errors apart. Discrete
-coordinates are left out.
+uses the derivatives, so the report has the two errors separately. Discrete
+coordinates are excluded.
 
 ### Projection error
 
-The accuracy that an output reduction gives up before any fitting. With the
+The error that an output reduction introduces before any fitting. With the
 encode and decode maps $E$ and $D$ of the reduction, it is
 $e_p(x) = \lVert f(x) - D(E(f(x))) \rVert_2$, the best that any model in the
 reduced space could reach.
@@ -186,18 +185,18 @@ reduced space could reach.
 
 The largest value error over the whole domain,
 $\max_{x \in \mathcal{D}} e_v(x)$. A held-out sample can miss the region where
-the fit is worst, so `fit` climbs $e_v$ with gradient ascent from several starts
-and keeps the largest value that it finds. It is a lower bound on the true
-maximum, since the climb can stop at a local maximum. See [worst-case
+the error is largest, so `fit` maximizes $e_v$ by gradient ascent from several
+starts and keeps the largest value that it finds. It is a lower bound on the
+true maximum, since the ascent can stop at a local maximum. See [worst-case
 error](techniques.md#worst-case-error).
 
 ### Coverage
 
-A number that says whether an input lies where the fit has evidence. For a box
-it is zero inside and one plus the relative excess outside. For a domain that
-was [inferred from data](getting-started.md#the-domain) it is at most one near
-the data and grows with the distance from it, so a value above one flags a
-prediction that extrapolates.
+A number that indicates whether an input is in the region where the fit has
+data. For a box it is zero inside and one plus the relative excess outside. For
+a domain that was [inferred from data](getting-started.md#the-domain) it is at
+most one near the data and increases with the distance from it, so a value above
+one flags a prediction that extrapolates.
 
 ## Fitting techniques
 
@@ -212,8 +211,8 @@ $$
 $$
 
 with the weight $w$ set by `derivative_weight`. For a linear form the Jacobian
-is also linear in $W$, so both terms stack into one least squares solve. See
-[derivative supervision](techniques.md#derivative-supervision).
+is also linear in $W$, so both terms are combined in one least squares solve.
+See [derivative supervision](techniques.md#derivative-supervision).
 
 ### Sparse basis
 
@@ -233,11 +232,11 @@ $\sum_{i \le r} \sigma_i^2 \big/ \sum_i \sigma_i^2 \ge$ `variance`.
 
 ### Active subspace
 
-The directions in input space along which the target changes. From the Jacobians
-$J_s = \partial f / \partial x (x_s)$ it takes the matrix
-$C = \frac{1}{N} \sum_s J_s^\top J_s \in \mathbb{R}^{n \times n}$ and keeps its
-leading eigenvectors. PCA looks at where the data lies, and the active subspace
-looks at where the function varies.
+The directions in input space along which the target changes. They are the
+leading eigenvectors of the matrix
+$C = \frac{1}{N} \sum_s J_s^\top J_s \in \mathbb{R}^{n \times n}$ of the
+Jacobians $J_s = \partial f / \partial x (x_s)$. PCA describes where the data
+is, and the active subspace describes where the function varies.
 
 ### Pruning
 
@@ -284,13 +283,13 @@ $a_j^\top x + b_j \le u$, and a linear program can minimize over it.
 
 The difference $\hat f = \max_j (a_j^\top x + b_j) - \max_j (c_j^\top x + d_j)$
 of two max-affine functions. It can represent any continuous piecewise linear
-function, and it carries a split into a convex and a concave part.
+function, and it has a split into a convex and a concave part.
 
 ### Convex and ReLU networks
 
 A ReLU network alternates affine maps with $\max(\cdot, 0)$ and is piecewise
-linear. An input-convex network keeps the weights from one hidden layer to the
-next nonnegative and lets every hidden layer read the input,
+linear. An input-convex network restricts the weights from one hidden layer to
+the next to nonnegative values and passes the input to every hidden layer,
 
 $$
 z_{l+1} = \max\bigl(U_l z_l + W_l x + b_l,\, 0\bigr), \qquad U_l \ge 0,
@@ -298,40 +297,40 @@ $$
 
 so every output is convex in $x$. The two networks represent the same functions
 as the max-affine form and the difference of max-affine form, and they can do so
-with far fewer parts. A solver encodes a ReLU network with one binary variable
-per hidden unit.
+with far fewer parts. A ReLU network is encoded in a mixed-integer program with
+one binary variable per hidden unit.
 
 ### Export
 
 Turning a fitted piecewise linear surrogate into plain arrays in the original
 coordinates, such as the slopes $a_j$ and intercepts $b_j$ of a max-affine form.
-The library stops at the arrays and leaves the program of a solver to you. See
-[solver export](forms.md#solver-export).
+`surreax` only returns the arrays, and you write the program for the solver
+yourself. See [solver export](forms.md#solver-export).
 
 ## Implicit targets
 
 ### Residual
 
 The function $g(x, y)$ of an implicit target. It has as many components as the
-unknown. The residual left by a surrogate at an input is
-$\lVert g(x, \hat f(x)) \rVert$, which is how a fit of an implicit target
-reports its error.
+unknown. The residual of a surrogate at an input is
+$\lVert g(x, \hat f(x)) \rVert$, and the report of a fit of an implicit target
+has it as the value error.
 
 ### Solution manifold
 
 The set of solutions $\{(x, y) : g(x, y) = 0\}$. The input has few coordinates
 and the unknown has many, so the solutions for all inputs form a surface whose
 dimension is at most $n$ inside a space of dimension $m$. Every reduced method
-exploits that low dimension.
+relies on that low dimension.
 
 ### Branch and fold
 
 A residual can have several solutions $y$ for one input, and each connected
 family of them is a branch. A fold is a point where
 $\det \partial g / \partial y = 0$ and two branches meet. No smooth function $f$
-exists through a fold. The `fold` report of the inverse map keeps one branch,
-the one with the sign of the determinant at the sample where its magnitude is
-largest.
+exists through a fold. The inverse map keeps one branch, the one with the sign
+of the determinant at the sample where its magnitude is largest, and its `fold`
+report flags the fold.
 
 ### Newton step
 
@@ -349,15 +348,15 @@ it can diverge.
 
 The method of `InverseMap`. It samples pairs $(x, y)$ and evaluates the residual
 forward, $r = g(x, y)$. The map $(x, y) \mapsto (x, r)$ is then inverted by a
-regression $y = h(x, r)$ over the augmented input $(x, r)$, and the surrogate
-reads the slice with zero residual, $\hat f(x) = h(x, 0)$. It needs no root
-solve beyond a few Newton steps to bring the samples close to the manifold. See
-[the inverse map](implicit.md#the-inverse-map).
+regression $y = h(x, r)$ over the augmented input $(x, r)$, and the surrogate is
+the slice with zero residual, $\hat f(x) = h(x, 0)$. It needs no root solve
+beyond a few Newton steps to bring the samples close to the manifold. See [the
+inverse map](implicit.md#the-inverse-map).
 
-### Objective route
+### Objective method
 
 The method of `Objective`. It fits $\hat f(x) = W \varphi(x)$ directly by
-minimizing the residual that it leaves,
+minimizing the residual at its predictions,
 
 $$
 \min_W \frac{1}{N} \sum_s \lVert g(x_s, W \varphi(x_s)) \rVert^2.
@@ -384,9 +383,9 @@ fit. The steps are these.
 The surrogate is $\hat y(x) = c + V^\top \hat z(x)$. The name says that the
 training states are exact solutions, and it does not say that the surrogate is
 exact. Its errors are the truncation of the PCA and the regression error of
-$\hat z$. The cost is one full Newton solve per sample, which the sparse
-Jacobian makes affordable for a large unknown. The alternative is the [reduced
-solve](#reduced-solve), which spends far fewer full solves.
+$\hat z$. The cost is one full Newton solve per sample, and with a sparse
+Jacobian this is affordable for a large unknown. The alternative is the [reduced
+solve](#reduced-solve), which needs far fewer full solves.
 
 ### Snapshot
 
@@ -396,7 +395,7 @@ row per snapshot.
 ### POD basis
 
 The proper orthogonal decomposition of the snapshots is the PCA of the snapshot
-matrix. It gives a center $c$ and an orthonormal basis, stored as the rows of
+matrix. It has a center $c$ and an orthonormal basis, stored as the rows of
 $V \in \mathbb{R}^{r \times m}$. The reduced state is the latent
 $z \in \mathbb{R}^r$, and the decoded state is $y = c + V^\top z$.
 
@@ -420,8 +419,8 @@ Each Newton step is an $r \times r$ solve whatever the size of $m$. The solver
 reports where the reduced Jacobian is badly conditioned and whether a second
 start finds a different latent root. The method then distills the map from the
 input to the latent into a regression, so the final surrogate needs no solve.
-The choice of snapshots is the first `snapshots` samples, or a greedy choice
-that adds a snapshot where the current basis leaves the most residual.
+The snapshots are the first `snapshots` samples, or a greedy selection that adds
+a snapshot at the sample where the residual of the current basis is largest.
 
 ### Kolmogorov n-width
 
@@ -438,18 +437,18 @@ sharp feature that moves with the input makes it decay slowly.
 
 ### Linear energy
 
-The fraction of the variation of the snapshots that $r$ linear modes capture,
+The fraction of the variance of the snapshots that $r$ linear modes explain,
 $\sum_{i \le r} \sigma_i^2 \big/ \sum_i \sigma_i^2$ for the singular values of
 the centered snapshot matrix. It estimates the n-width from data, and
-`recommend_reduced_method` reads it to choose between a linear basis and an
+`recommend_reduced_method` uses it to choose between a linear basis and an
 autoencoder.
 
 ### Autoencoder solve
 
-The method of `AutoencoderSolve`. A decoder $D$ maps the latent to the full
-state onto a learned manifold, $D(z) = c + Wz + N(z)$ with a small network $N$,
-and an encoder $E$ maps back. The latent solve minimizes the residual of the
-decoded state by Gauss-Newton,
+The method of `AutoencoderSolve`. A decoder $D$ maps the latent to a full state
+on a learned manifold, $D(z) = c + Wz + N(z)$ with a small network $N$, and an
+encoder $E$ maps back. The latent solve minimizes the residual of the decoded
+state by Gauss-Newton,
 
 $$
 z^\star(x) = \arg\min_z \lVert g(x, D(z)) \rVert^2.
@@ -459,9 +458,9 @@ This is the least-squares Petrov-Galerkin projection of [Carlberg and
 colleagues](https://arxiv.org/abs/2012.06073). Training lowers the residual at
 $z^\star(x)$ over sampled inputs. It also trains $E$ so that $E(D(z)) = z$, and
 a small network, the `LatentGuess`, that predicts $z^\star(x)$ to start each
-solve. With `snapshots` at zero it only evaluates $g$ forward and never solves a
-full state. A positive count solves that many full states and pretrains the
-decoder on them.
+solve. With `snapshots` at zero the training only evaluates $g$ forward and
+never solves a full state. A positive count solves that many full states and
+pretrains the decoder on them.
 
 ### Hyper-reduction
 
@@ -476,8 +475,8 @@ $$
 \min_z \bigl\lVert (U_P)^{+}\, g_P\bigl(x, D(z)\bigr) \bigr\rVert^2.
 $$
 
-It needs a [stencil residual](#stencil-residual), so that evaluating an entry
-reads only a few state entries.
+It needs a [stencil residual](#stencil-residual), so that each entry depends on
+only a few state entries.
 
 ### Stencil residual
 
@@ -490,29 +489,29 @@ $$
 
 The table $\mathcal{N}$ of neighbor indices is the stencil. It makes the
 Jacobian sparse, with entry $(i, j)$ nonzero only for $j \in \mathcal{N}(i)$,
-and it lets hyper-reduction evaluate single entries. In the code it is a
+and with it, hyper-reduction can evaluate single entries. In the code it is a
 `StencilResidual`.
 
 ### Linear solver
 
-How a Newton step solves $J\, \delta = g$ with $J = \partial g / \partial y$.
-`"dense"` forms $J$ and factors it, which suits a small unknown. `"sparse"`
-reads the sparsity pattern of $J$, colors it so that $J$ costs one
-Jacobian-vector product per color, and factors it with a sparse direct solver.
-`"matrix_free"` runs GMRES on Jacobian-vector products and never forms $J$. The
-sparse choice falls back to the matrix-free one when the residual has no usable
-pattern.
+The way that a Newton step solves $J\, \delta = g$ with
+$J = \partial g / \partial y$. `"dense"` forms $J$ and factors it, which suits a
+small unknown. `"sparse"` detects the sparsity pattern of $J$, colors it so that
+computing $J$ takes one Jacobian-vector product per color, and factors it with a
+sparse direct solver. `"matrix_free"` runs GMRES on Jacobian-vector products and
+never forms $J$. The matrix-free solver is used in place of the sparse one when
+the residual has no usable pattern.
 
 ### Factorization reuse
 
 The `reuse` setting keeps the factorization of an earlier matrix
 $J_{\text{old}}$ as the preconditioner of an iterative solve with a new matrix
-$J$, and factors $J$ again only when that solve is slow. It saves time when a
-factorization costs much more than a back-substitution.
+$J$, and factors $J$ again only when that solve is slow. It is faster when a
+factorization takes much longer than a back-substitution.
 
 ### Refinement
 
-Polishing a prediction with $K$ Newton steps at call time,
+Improving a prediction with $K$ Newton steps at call time,
 $\hat y_K = \mathcal{N}^K(\hat f(x))$ with $\mathcal{N}$ the Newton step. It
 turns an explicit surrogate into a solve-at-call one with a smaller residual.
 

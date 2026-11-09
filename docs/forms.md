@@ -1,11 +1,11 @@
 # Model forms
 
-A model form is the shape the surrogate is allowed to take. `surreax` fits the
-most accurate surrogate it can within that shape, so choosing the form sets the
-trade-off between accuracy and how easy the result is to reason about. You pass
-the form as the third argument of `fit`, and the [basic
+A model form is the kind of function that the surrogate may be. `surreax` fits
+the most accurate surrogate it can find within that form, so choosing the form
+sets the trade-off between accuracy and how easy the result is to reason about.
+You pass the form as the third argument of `fit`, and the [basic
 workflow](getting-started.md) page describes the other arguments and the report
-that every example below reads. The [terminology](terminology.md) page defines
+that every example below checks. The [terminology](terminology.md) page defines
 the terms of this page, such as the linear form and the structure cost.
 
 | Form | Fitted by | Structure of the result |
@@ -19,18 +19,19 @@ the terms of this page, such as the linear form and the structure cost.
 | `ReluNetworkForm` | Gradient descent | Piecewise linear |
 | `NetworkForm` | Gradient descent | Smooth, with no structure to exploit |
 
-Every form takes the number of pieces, units or nodes that it may use, and the
-report's `structure_cost` says how many it used. The piecewise linear forms
-export as arrays, see [solver export](#solver-export).
+Most forms take a size, such as the number of pieces, units or nodes, and the
+report's `structure_cost` is the size of the fitted result. The piecewise linear
+forms can be exported as arrays, as described in [solver
+export](#solver-export).
 
 ## The form interface
 
-A form supplies a feature map. For a form that is linear in its parameters, the
-output is `weights @ features(x)`, one row of `weights` per output coordinate.
-That single method is the whole interface, described by the `LinearForm`
-protocol, so you can drop in your own form without subclassing anything. The
-`Affine`, `ChebyshevPolynomial` and `Grid` forms satisfy it, and the other forms
-are not linear in their parameters.
+A form that is linear in its parameters has a feature map, and its output is
+`weights @ features(x)`, with one row of `weights` per output coordinate. The
+`LinearForm` protocol consists of that single `features` method, so your own
+form only needs that method and no base class. The `Affine`,
+`ChebyshevPolynomial` and `Grid` forms satisfy it, and the other forms are not
+linear in their parameters.
 
 <!-- name: test_forms_protocol -->
 ```python
@@ -43,8 +44,8 @@ assert isinstance(sx.ChebyshevPolynomial(degree=3), sx.LinearForm)
 
 ## Affine
 
-The affine form is the input with a constant prepended. It recovers an affine
-target exactly, which makes it a baseline and a sanity check.
+The affine form is the input with a constant prepended. It fits an affine target
+exactly, so it is useful as a baseline and a sanity check.
 
 <!-- name: test_forms_affine -->
 ```python
@@ -67,8 +68,9 @@ assert float(surrogate.report.value_max) < 1e-3
 
 The polynomial form uses products of Chebyshev polynomials over every exponent
 tuple whose total degree is at most `degree`. It is linear in its parameters, so
-it fits in one solve, and it converges quickly for smooth targets. A target that
-is itself a polynomial of low enough degree comes back exactly.
+it is fitted with one linear solve, and for a smooth target its error decreases
+quickly with the degree. A target that is itself a polynomial of low enough
+degree is reproduced exactly.
 
 <!-- name: test_forms_polynomial -->
 ```python
@@ -85,8 +87,8 @@ surrogate = sx.fit(cubic, domain, sx.ChebyshevPolynomial(degree=3), samples=256)
 assert float(surrogate.report.value_max) < 1e-3
 ```
 
-Raising the degree lowers the error on a smooth target, at the cost of more
-parameters. The report is how you watch that trade-off.
+Raising the degree lowers the error on a smooth target and increases the number
+of parameters. The reports of fits at several degrees show that trade-off.
 
 ## Max-affine
 
@@ -101,13 +103,13 @@ each sample to the piece that attains the maximum and refits each piece by least
 squares, in the manner of k-means, from several random restarts. The method is
 from Magnani and Boyd, [Convex piecewise-linear
 fitting](https://web.stanford.edu/~boyd/papers/pdf/cvx_pwl_fit.pdf),
-Optimization and Engineering 10(1), 2009. A gradient route, from [Max-Affine
+Optimization and Engineering 10(1), 2009. A gradient method, from [Max-Affine
 Regression via First-Order Methods](https://arxiv.org/abs/2308.06276), is
 available with `method="gradient"`.
 
-You choose the number of pieces. The report gives the [structure
-cost](terminology.md#structure-cost), the piece count, which sets how expensive
-the surrogate is to reason about later.
+You choose the number of pieces. The report's [structure
+cost](terminology.md#structure-cost) is the number of pieces, which determines
+how expensive the surrogate is to reason about later.
 
 <!-- name: test_forms_max_affine -->
 ```python
@@ -129,13 +131,14 @@ assert surrogate.report.structure_cost == 2
 
 Subtracting one convex max-affine function from another gives a general
 piecewise linear function, so this form fits a target that is not convex, which
-a single max-affine cannot. The fit also carries the split into a convex and a
-concave part, which a difference-of-convex optimization algorithm works on.
+a single max-affine cannot. The fitted surrogate also has the split into a
+convex and a concave part, which a difference-of-convex optimization algorithm
+needs.
 
-The difference is not convex and not linear in its parameters, so it fits by
-gradient descent through optimistix from several restarts, each started from a
-plain max-affine fit of the positive part. You choose the number of pieces per
-part, and the structure cost is the total across both.
+The difference is not convex and not linear in its parameters, so it is fitted
+by gradient descent through optimistix from several restarts, each started from
+a plain max-affine fit of the positive part. You choose the number of pieces per
+part, and the structure cost is the sum over both parts.
 
 <!-- name: test_forms_difference -->
 ```python
@@ -161,12 +164,12 @@ assert surrogate.report.structure_cost == 4
 
 The network form is a feedforward multilayer perceptron with a smooth
 activation. It is not a structured form, so a solver cannot reason about it, but
-it is the accuracy reference that shows how much accuracy the structured forms
-cost, and the fallback when none of them fits well. It is not linear in its
-parameters, so it fits by gradient descent through optimistix. Its structure
-cost is the parameter count.
+its error is a reference for how much accuracy the structured forms lose, and it
+is the alternative when none of them fits well. It is not linear in its
+parameters, so it is fitted by gradient descent through optimistix. Its
+structure cost is the parameter count.
 
-Because the network holds an activation function as a leaf, jit it with
+Because the network has its activation function as a leaf, compile it with
 `equinox.filter_jit` or a closure rather than passing it as a raw `jax.jit`
 argument.
 
@@ -191,17 +194,17 @@ assert float(surrogate.report.value_mean) < 0.02
 `ConvexNetworkForm` is an input-convex neural network, from Amos, Xu and Kolter,
 [Input Convex Neural Networks](https://arxiv.org/abs/1609.07400). Its hidden
 layers use ReLU activations, its weights from one hidden layer to the next are
-nonnegative, and every layer also reads the input directly. Each output is then
-a convex piecewise linear function of the input, which is the same set of
-functions as the max-affine form. A solver minimizes it as a linear program with
-one auxiliary variable per hidden unit, so the program grows with the number of
-units, not with the number of affine pieces.
+nonnegative, and every layer also has a direct connection from the input. Each
+output is then a convex piecewise linear function of the input, which is the
+same set of functions as the max-affine form. It can be minimized as a linear
+program with one auxiliary variable per hidden unit, so the size of the program
+increases with the number of units, not with the number of affine pieces.
 
 It differs from a max-affine fit in size. The sum `|x0| + ... + |x5|` of six
-inputs has 64 affine pieces as a maximum, and a network writes it with about a
-dozen units. The nonnegative weights are the softplus of free parameters, and
-the fit is gradient descent through optimistix from several random starts,
-keeping the best. `depth` is the number of hidden layers.
+inputs has 64 affine pieces as a maximum, and a network represents it with about
+a dozen units. The nonnegative weights are the softplus of free parameters, and
+the fit runs gradient descent through optimistix from several random starts and
+keeps the best result. `depth` is the number of hidden layers.
 
 <!-- name: test_forms_convex_network -->
 ```python
@@ -228,17 +231,17 @@ assert all(bool(jnp.all(weights >= 0)) for weights in export.hidden_weights)
 `ReluNetworkForm` is a plain multilayer perceptron with ReLU activations. It
 represents every continuous piecewise linear function, the same set as the
 difference of max-affine form, so it fits targets that are neither convex nor
-concave. A mixed-integer program encodes it with one binary variable per hidden
-unit, each with a pair of big-M constraints, which switch an inequality on or
-off with that binary variable through a bound on the expression. It trains the
-same way as the convex network.
+concave. It can be encoded in a mixed-integer program with one binary variable
+per hidden unit, each with a pair of big-M constraints. A big-M constraint
+switches an inequality on or off with that binary variable through a bound on
+the expression. It is trained the same way as the convex network.
 
 Each network form represents the same functions as its max-affine counterpart,
-so the choice is about size and about how well the fit trains. The comparison
-below comes from the [test systems](test-systems.md) and the form comparison
-tests, with mean errors on held-out points. The three systems are described on
-that page. The [radiating rod](test-systems.md#radiating-rod) is a rod with
-heaters that also loses heat by radiation. The [thermostat
+so the choice depends on the size and on how reliably the fit converges. The
+comparison below is from the [test systems](test-systems.md) and the form
+comparison tests, with mean errors on held-out points. The three systems are
+described on that page. The [radiating rod](test-systems.md#radiating-rod) is a
+rod with heaters that also loses heat by radiation. The [thermostat
 rod](test-systems.md#thermostat-rod) has thermostat-controlled heaters, which
 makes its response neither convex nor concave. The [diode
 network](test-systems.md#diode-network) is a mesh of resistors and diodes. The
@@ -258,14 +261,15 @@ voltages, as a function of two to four inputs.
   difference of max-affine with 4 and 4 pieces matched a ReLU network with about
   twice the parameters. On the four-input diode network, 8 and 8 pieces reached
   0.0044 against 0.0094 for a ReLU network with a similar parameter count. A
-  wider ReLU network did overtake the pieces on the radiating rod, at 0.0096
-  with 354 parameters against 0.017 with 96.
+  wider ReLU network had a lower error than the pieces on the radiating rod, at
+  0.0096 with 354 parameters against 0.017 with 96.
 - A convex network cannot follow a response that is not convex. On the radiating
-  rod and the thermostat rod it left more than three times the error of a ReLU
+  rod and the thermostat rod it had more than three times the error of a ReLU
   network.
-- The convex network trains less reliably than a plain one. On the mildly
-  nonconvex diode network it reached 0.017, no better than max-affine with 16
-  pieces at 0.012, and a wider network did worse at 0.025, so try a few widths.
+- The convex network is less reliable to train than a plain ReLU network. On the
+  mildly nonconvex diode network it reached 0.017, no better than max-affine
+  with 16 pieces at 0.012, and a wider network did worse at 0.025, so try a few
+  widths.
 
 <!-- name: test_forms_relu_network -->
 ```python
@@ -295,10 +299,10 @@ assert jnp.allclose(by_hand, surrogate(point), atol=1e-4)
 ## Grid
 
 The grid form places a regular grid over the input box and interpolates
-multilinearly between the nodes. It is linear in the node values, so it fits by
-one linear solve, and the error falls as the grid refines. The node count grows
-as the resolution to the power of the input dimension, so it is best after a
-reduction, when the reduced input is small.
+multilinearly between the nodes. It is linear in the node values, so it is
+fitted with one linear solve, and the error decreases as the grid is refined.
+The node count is the resolution to the power of the input dimension, so the
+form is best suited to a small reduced input after a reduction.
 
 <!-- name: test_forms_grid -->
 ```python
@@ -323,22 +327,23 @@ original coordinates.
 ## Solver export
 
 The point of a piecewise linear form is that a solver can reason about it. A
-max-affine surrogate is a maximum of affine pieces, so it is a linear program,
-and a difference of two is a pair of them. `export` returns the slopes and
+max-affine surrogate is a maximum of affine pieces, so it can be written as one
+linear inequality per piece, and both parts of a difference of two such
+surrogates can be written in the same way. `export` returns the slopes and
 intercepts as plain arrays, in the domain's flat coordinates, so you can write
-the encoding in whatever optimization framework you use. The network forms
-export their layer matrices the same way. For a box the flat coordinates are the
-inputs themselves, and for a `LogRange` input the coordinate is its logarithm.
-The [terminology](terminology.md#flat-coordinates) page defines the flat
-coordinates. The export folds the input and output normalization into the
-arrays, so they act on the original input and produce the original output. It
-needs an identity output reduction, because a reduced output space mixes the
+the encoding in whatever optimization framework you use. For the network forms,
+`export` returns the layer matrices the same way. For a box the flat coordinates
+are the inputs themselves, and for a `LogRange` input the coordinate is its
+logarithm. The [terminology](terminology.md#flat-coordinates) page defines the
+flat coordinates. `export` includes the input and output normalization in the
+arrays, so the arrays act on the original input and produce the original output.
+It needs an identity output reduction, because a reduced output space mixes the
 outputs, and it raises an error otherwise.
 
-The library exports arrays and nothing else, to stay free of a solver
-dependency. For the mixed-integer and linear-program encodings these arrays
-feed, see [OMLT](https://arxiv.org/abs/2202.02414). The test suite also holds
-two small encodings, which the [test
+`export` returns only arrays, so `surreax` does not depend on a solver. For
+mixed-integer and linear-program encodings that take these arrays, see
+[OMLT](https://arxiv.org/abs/2202.02414). The test suite also contains two small
+encodings, which the [test
 systems](test-systems.md#optimization-over-exported-surrogates) page describes.
 
 <!-- name: test_forms_export -->

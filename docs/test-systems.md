@@ -1,16 +1,16 @@
 # Test systems
 
 The test suite fits a small set of physical systems, and this page describes
-each one. It gives the equations, the shape of the problem, the parts of
-`surreax` that the system exercises, and links to the code that builds it and to
-the tests that use it. Reading it should tell you which system to pick when you
-want to try a feature on a realistic problem.
+each one. It lists the equations, the shape of the problem, the parts of
+`surreax` that the system tests, and links to the code that builds it and to the
+tests that use it. The page is meant to help you pick a system when you want to
+try a feature on a realistic problem.
 
-The builders live in the `tests` directory of the
+The builders are in the `tests` directory of the
 [repository](https://github.com/nardi/surreax/tree/main/tests), and the package
-on PyPI does not ship them. To use one, clone the repository and import it from
-the top level, for example `from tests import implicit_systems`. The links on
-this page point at the `main` branch.
+on PyPI does not include them. To use one, clone the repository and import it
+from the top level, for example `from tests import implicit_systems`. The links
+on this page point at the `main` branch.
 
 ## The two kinds of system
 
@@ -33,20 +33,20 @@ and the functions around it returns an
 a named tuple of three fields.
 
 - `residual` is a [`StencilResidual`](terminology.md#stencil-residual), which
-  writes entry $i$ of the residual as a function of the input, the index $i$,
+  defines entry $i$ of the residual as a function of the input, the index $i$,
   and the unknown at a few neighbors of node $i$. The table of neighbor indices
   is the stencil. It makes the Jacobian $\partial g / \partial y$ sparse with a
-  known pattern, and it lets [hyper-reduction](terminology.md#hyper-reduction)
-  evaluate single entries.
+  known pattern, and with it, [hyper-reduction](terminology.md#hyper-reduction)
+  can evaluate single entries.
 - `domain` is the `Box` of inputs that a fit samples.
-- `unknown_domain` is the `Box` that the Newton solves draw their starting
-  states from.
+- `unknown_domain` is the `Box` from which the starting states of the Newton
+  solves are drawn.
 
-Every implicit system has a few inputs and many unknowns. The solution lies on a
+Every implicit system has a few inputs and many unknowns. The solution is on a
 manifold whose dimension is at most the number of inputs, whatever the size of
-the state, and the systems differ in how that manifold looks. It is flat for a
-linear residual, curved for a nonlinear one, and it can bend sharply, fold, or
-split into several branches.
+the state, and the systems differ in the shape of that manifold. It is flat for
+a linear residual and curved for a nonlinear one, and it can have sharp bends,
+folds, or several branches.
 
 ## Overview
 
@@ -108,7 +108,7 @@ x = e^{-\delta t} \cos(\omega t), \qquad
 $$
 
 with mass $m \in [1, 2]$, stiffness $k \in [8, 12]$ and damping
-$c \in [0.1, 1]$. The box stays in the underdamped region, so $\omega$ is real
+$c \in [0.1, 1]$. The box is inside the underdamped region, so $\omega$ is real
 everywhere.
 
 <figure class="schematic">
@@ -129,9 +129,9 @@ everywhere.
 </figure>
 
 The input is not an array. It is an `equinox.Module` with the named fields
-`mass`, `stiffness` and `damping`, and the `Box` holds the bounds as the same
-kind of module. The system shows that the target, the domain, the surrogate and
-its derivatives all work on a pytree input. The builders are
+`mass`, `stiffness` and `damping`, and the `Box` has its bounds as the same kind
+of module. The system shows that the target, the domain, the surrogate and its
+derivatives all work on a pytree input. The builders are
 [`OscillatorState`](https://github.com/nardi/surreax/blob/main/tests/systems.py#L30),
 [`oscillator_displacement`](https://github.com/nardi/surreax/blob/main/tests/systems.py#L42)
 and
@@ -195,7 +195,7 @@ $$
 
 with the inputs numbered from one here and from zero in the code. The Jacobian
 shows that ten inputs have no effect, and the function varies along only two
-directions. It exercises exact [pruning](terminology.md#pruning),
+directions. It tests exact [pruning](terminology.md#pruning),
 [active-subspace](terminology.md#active-subspace) reduction, and the [sparse
 basis](terminology.md#sparse-basis) selection, where a total-degree basis in
 twelve inputs has far more terms than a small sample can support. The builders
@@ -221,12 +221,13 @@ $$
 with periodic neighbors and the four smooth modes
 $\psi = \sin 2\pi s, \cos 2\pi s, \sin 4\pi s, \cos 4\pi s$ on $s \in [0, 1]$.
 The Jacobian in $y$ has three nonzeros per row, so a sparse factorization costs
-far less than a dense one. The field lies in the span of four modes however fine
+far less than a dense one. The field is in the span of four modes however fine
 the grid is, so the output reduction of
 [`ExactSolve`](terminology.md#exact-solve) and the
 [latent](terminology.md#latent) space of
 [`ReducedSolve`](terminology.md#reduced-solve) both need only four coordinates.
-This is the case that the sparse solve and the output reduction are built for.
+This is the case that the sparse solve and the output reduction are designed
+for.
 
 The builders are
 [`large_sparse_residual`](https://github.com/nardi/surreax/blob/main/tests/systems.py#L123),
@@ -241,17 +242,17 @@ and
 
 ## Implicit systems
 
-The systems below live in `tests/implicit_systems.py`. The equations number the
+The systems below are in `tests/implicit_systems.py`. The equations number the
 points and the inputs from one, and the code numbers them from zero. Each
 builder takes the number of points or nodes, so a test can run a system small
 for correctness and large for scaling. The chain systems use unscaled
-differences, so the conduction operator keeps a bounded condition number and the
-matrix-free solve converges in a few iterations at any size.
+differences, so the conduction operator has a bounded condition number at any
+size, and the matrix-free solve converges in a few iterations.
 
 Two tests check every system together. One solves each from zero over the input
-domain and checks that the Jacobian reads the unknown only where the stencil
-says. The other checks that a stencil entry evaluated on its own equals the
-matching entry of the full residual.
+domain and checks that the Jacobian is nonzero only at the entries of the
+unknown that the stencil lists. The other checks that a stencil entry evaluated
+on its own equals the matching entry of the full residual.
 
 - [`test_system_solves_and_stays_within_its_stencil`](https://github.com/nardi/surreax/blob/main/tests/integration/test_implicit_systems.py#L42)
 - [`test_stencil_entries_match_the_full_residual`](https://github.com/nardi/surreax/blob/main/tests/integration/test_implicit_systems.py#L56)
@@ -271,7 +272,7 @@ $$
 where the term $\tfrac12 y_i$ is heat lost to the air.
 
 <figure class="schematic">
-<svg viewBox="0 0 580 160" width="580" role="img" aria-label="A chain of nodes between two ambient ends, with a heater profile above it and the three nodes that one residual entry reads">
+<svg viewBox="0 0 580 160" width="580" role="img" aria-label="A chain of nodes between two ambient ends, with a heater profile above it and the three nodes that one residual entry depends on">
 <path class="soft" d="M40 70Q290 -20 540 70Z"/>
 <path class="line thin" d="M40 70Q290 -20 540 70"/>
 <path class="line thin" d="M240 36V76M310 28V76M380 36V76M236 68l4 8 4-8M306 68l4 8 4-8M376 68l4 8 4-8"/>
@@ -295,16 +296,16 @@ where the term $\tfrac12 y_i$ is heat lost to the air.
 <text x="310" y="145" text-anchor="middle" class="accent-text">entry i of the residual</text>
 <text x="290" y="18" text-anchor="middle" class="small">heat deposited by the heaters</text>
 </svg>
-<figcaption>A chain of nodes between two ambient ends. Entry i of the residual reads the three highlighted nodes.</figcaption>
+<figcaption>A chain of nodes between two ambient ends. Entry i of the residual depends on the three highlighted nodes.</figcaption>
 </figure>
 
 The residual is affine in $y$ and in $x$, so the temperature is an exact linear
 map of the heater powers, $y = A^{-1} \Phi^\top x$, where $A$ is a fixed
-tridiagonal matrix and the rows of $\Phi$ hold the heater profiles. The
-solutions fill a linear subspace of dimension $k$ and nothing else. This gives
-the cleanest checks for the implicit methods. An `Affine` form recovers the map
-exactly, and a `ReducedSolve` leaves a residual of zero once its rank reaches
-$k$ and a large one just below it.
+tridiagonal matrix and the rows of $\Phi$ are the heater profiles. The solutions
+form a linear subspace of dimension $k$. This system allows the cleanest checks
+for the implicit methods. An `Affine` form fits the map exactly, and the
+residual of a `ReducedSolve` is zero once its rank reaches $k$ and large just
+below it.
 
 The builder is
 [`heated_rod`](https://github.com/nardi/surreax/blob/main/tests/implicit_systems.py#L53).
@@ -325,13 +326,14 @@ $$
 
 The fourth power is written with a sign, so a point colder than ambient gains
 heat. The Jacobian now depends on the state, so the temperature is a curved
-function of the heater powers and the manifold bends out of a $k$-dimensional
-subspace. With more power the rod radiates more, which makes the temperature
-concave in the heater powers. That property is what the optimization test uses.
+function of the heater powers and the manifold is curved and not contained in a
+$k$-dimensional subspace. With more power the rod radiates more, which makes the
+temperature concave in the heater powers. The optimization test relies on that
+property.
 
 The system is the standard nonlinear example. It shows that a linear reduced
-basis needs more than $k$ modes, it drives the piecewise linear fits through the
-latent coefficients of its reduced solver, and at 4096 points it is one of the
+basis needs more than $k$ modes, the latent coefficients of its reduced solver
+are the target of the piecewise linear fits, and at 4096 points it is one of the
 systems that the Newton benchmarks time. The builder is
 [`radiating_rod`](https://github.com/nardi/surreax/blob/main/tests/implicit_systems.py#L77).
 
@@ -342,9 +344,9 @@ systems that the Newton benchmarks time. The builder is
 
 ### Thermostat rod
 
-Every point of this rod has a thermostat-controlled heater, and the rod sits in
-an ambient temperature $a = x_1$ that varies. A load $q = x_2$ heats a patch of
-the rod. With the ends at the ambient temperature the residual is
+Every point of this rod has a thermostat-controlled heater, and the rod is in an
+ambient temperature $a = x_1$ that varies. A load $q = x_2$ heats a patch of the
+rod. With the ends at the ambient temperature the residual is
 
 $$
 g_i(x, y) = -(y_{i-1} - 2 y_i + y_{i+1}) + \tfrac12 (y_i - a)
@@ -378,8 +380,8 @@ slope one. As the ambient cools, the heaters ramp up and hold the rod near the
 setpoint, so the slope drops to about zero. Once the heaters saturate, the rod
 follows the ambient again, about $2P$ warmer. The response therefore has slope
 one, then zero, then one, which is concave at the first kink and convex at the
-second. The Jacobian is positive definite, because the heaters push back against
-a temperature change, so the solution is unique.
+second. The Jacobian is positive definite, because the heaters counteract a
+temperature change, so the solution is unique.
 
 This is the system for the forms that can represent a function that is neither
 convex nor concave. A difference of max-affine fits it, a ReLU network fits it
@@ -447,7 +449,7 @@ and
 ### Rod with hot spots
 
 An insulated rod radiates only at three bare patches. The radiation term of the
-[radiating rod](#radiating-rod) gets a mask $m_i$ that is nonzero at only a few
+[radiating rod](#radiating-rod) has a mask $m_i$ that is nonzero at only a few
 points,
 
 $$
@@ -456,15 +458,15 @@ g_i(x, y) = -(y_{i-1} - 2 y_i + y_{i+1}) + \tfrac12 y_i
 $$
 
 The mask is a sum of three narrow Gaussian bumps at $0.25$, $0.5$ and $0.75$ of
-the rod, cut to zero where it falls below $10^{-3}$. Its width is a fixed
-fraction of the rod, so the patches cover about the same number of points
-however fine the rod is. The nonlinear part of the residual lives on a small set
-of entries.
+the rod, set to zero where it is below $10^{-3}$. Its width is a fixed fraction
+of the rod, so each patch contains about the same number of points however fine
+the rod is. The nonlinear part of the residual is nonzero only on a small set of
+entries.
 
 That is the case for [hyper-reduction](terminology.md#hyper-reduction). The
-entries that the discrete empirical interpolation method chooses gather on the
-patches, and the cost of the latent solve stays flat as the state grows. The
-builder is
+entries that the discrete empirical interpolation method chooses are on the
+patches, and the cost of the latent solve does not increase with the state size.
+The builder is
 [`rod_with_hot_spots`](https://github.com/nardi/surreax/blob/main/tests/implicit_systems.py#L221).
 
 - [`test_hot_spot_nonlinearity_stays_on_the_patches`](https://github.com/nardi/surreax/blob/main/tests/integration/test_implicit_systems.py#L81)
@@ -503,12 +505,12 @@ $q_i = \exp(-((i - s)/1.5)^2)$ centered at $s = m/8 + x_1 (m - m/4)$.
 </figure>
 
 The fluid is cold upstream of the heater and warm after it, so the solution is a
-sharp step that slides along the pipe with the heater. The manifold has two
-dimensions, but a linear basis needs about one mode per step position. This is
-the hard case for a linear reduced basis and the case the [learned
-manifold](terminology.md#autoencoder-solve) exists for. A rank-two autoencoder
-leaves about a third of the residual that eight linear modes leave. The builder
-is
+sharp step at the heater position. The manifold has two dimensions, but a linear
+basis needs about one mode per step position. This is the hard case for a linear
+reduced basis and the case that the [learned
+manifold](terminology.md#autoencoder-solve) is designed for. The residual of a
+rank-two autoencoder is about a third of the residual with eight linear modes.
+The builder is
 [`hot_fluid_pipe`](https://github.com/nardi/surreax/blob/main/tests/implicit_systems.py#L249).
 
 - [`test_learned_manifold_beats_a_linear_basis_on_a_moving_front`](https://github.com/nardi/surreax/blob/main/tests/integration/test_autoencoder.py#L109)
@@ -519,8 +521,8 @@ is
 
 A column pressed from its ends buckles past a critical load. The deflection is
 $y$, the load $x_1 \in [0, 2]$ is a multiple of the critical load, and
-$x_2 \in [-0.05, 0.05]$ is a small sideways push. The beam balances bending
-against the load with a cubic term,
+$x_2 \in [-0.05, 0.05]$ is a small sideways push. The residual balances the
+bending stiffness against the load, with a cubic term,
 
 $$
 g(x, y) = \frac{K y}{\lambda^2} + x_1 \frac{D y}{\lambda} + y^3 - x_2,
@@ -553,14 +555,15 @@ The lowest bending mode then has stiffness $1 - x_1$.
 <figcaption>A pinned column under load, and the shapes it takes as the load grows.</figcaption>
 </figure>
 
-Past $x_1 = 1$ the straight beam loses that stiffness. The Jacobian turns
+Past $x_1 = 1$ the straight beam loses that stiffness. The Jacobian becomes
 singular, and two bowed shapes appear, one for each direction of the push. The
 system is a bifurcation, so it tests the places where a fit can go wrong. The
 reduced solver reports several roots and a poor conditioning near the critical
 load, and Newton converges only linearly there, so the [convergence
 check](implicit.md#convergence-of-the-newton-solves) needs to be switched off
-for the snapshots. The fourth difference cancels in single precision on a fine
-grid, so the beam keeps to a few dozen points. The builder is
+for the snapshots. The fourth difference loses its accuracy to cancellation in
+single precision on a fine grid, so the beam has only a few dozen points. The
+builder is
 [`buckling_beam`](https://github.com/nardi/surreax/blob/main/tests/implicit_systems.py#L283).
 
 - [`test_beam_buckles_past_the_critical_load`](https://github.com/nardi/surreax/blob/main/tests/integration/test_implicit_systems.py#L94)
@@ -577,16 +580,16 @@ $$
 
 where $w_{ij}$ is the conductance of the wire between nodes $i$ and $j$, drawn
 uniformly from $[0.5, 2]$, and the term $0.1\, y_i$ is a small leak to ground.
-The matrix $E$ places each input as a current at one node. The mesh is a grid
-with a few random long wires added.
+The matrix $E$ maps each input to a current at one node. The mesh is a grid with
+a few random long wires added.
 
 The residual is the graph Laplacian in place of the chain of the rod. It is
 affine in $y$ and in $x$, so the voltages are an exact linear map of the
-sources, as for the [heated rod](#heated-rod). The difference is the sparsity.
-The long wires make the Jacobian sparse without being banded, which tests that
-the pattern reading, the coloring and the sparse solve do not rely on a chain.
-The system also shows that a greedy choice of snapshots reaches an exact
-solution with six full solves for four sources. The builder is
+sources, as for the [heated rod](#heated-rod). The difference is in the
+sparsity, because the long wires make the Jacobian sparse but not banded. This
+tests that the pattern detection, the coloring and the sparse solve do not rely
+on a chain. The system also shows that a greedy choice of snapshots reaches an
+exact solution with six full solves for four sources. The builder is
 [`resistor_network`](https://github.com/nardi/surreax/blob/main/tests/implicit_systems.py#L363).
 
 - [`test_resistor_network_is_exact_on_a_general_graph`](https://github.com/nardi/surreax/blob/main/tests/integration/test_reduced_order_systems.py#L57)
@@ -636,8 +639,8 @@ nonlinearity only on the diode wires. It is also stiff. Newton diverges from a
 start far from a root, which makes it the system for the [convergence
 check](implicit.md#convergence-of-the-newton-solves), and the reason the reduced
 solvers on it use a small box of starting voltages. It is a four-input target
-for the piecewise linear forms, where it is only mildly nonconvex. The learned
-manifold hyper-reduces on its graph stencil. The builder is
+for the piecewise linear forms, where it is only mildly nonconvex. The
+learned-manifold solver is hyper-reduced on its graph stencil. The builder is
 [`diode_network`](https://github.com/nardi/surreax/blob/main/tests/implicit_systems.py#L395).
 
 - [`test_exact_solve_raises_when_the_newton_solves_diverge`](https://github.com/nardi/surreax/blob/main/tests/integration/test_convergence_check.py#L25)
@@ -705,21 +708,21 @@ confirm that both are solutions. The builder is
 
 The piecewise linear forms need explicit targets, so
 [`Case`](https://github.com/nardi/surreax/blob/main/tests/piecewise_cases.py#L17)
-turns an implicit system into one. It builds a
+converts an implicit system to one. It builds a
 [`ReducedSolve`](terminology.md#reduced-solve) with 48
 [snapshots](terminology.md#snapshot) and a dense linear solver, and takes the
 [latent](terminology.md#latent) coefficients $z(x)$ of the reduced solver as the
 target. The decode back to the field is affine, so a piecewise linear latent is
-a piecewise linear field. A case scores a fit by the mean latent error over the
-mean latent norm on 100 inputs held out from the fit.
+a piecewise linear field. A case measures a fit by the ratio of the mean latent
+error to the mean latent norm, on 100 inputs held out from the fit.
 
 [`build`](https://github.com/nardi/surreax/blob/main/tests/piecewise_cases.py#L52)
-makes three cases. The `rod` is the [radiating rod](#radiating-rod) on 32 points
-with two heaters at rank two, the `network` is the [diode
+returns three cases. The `rod` is the [radiating rod](#radiating-rod) on 32
+points with two heaters at rank two, the `network` is the [diode
 network](#diode-network) on a $12 \times 12$ mesh with four sources at rank
 four, and the `thermostat` is the [thermostat rod](#thermostat-rod) on 32 points
-at rank three. The [model forms](forms.md#relu-network) page quotes the
-comparisons that they produce.
+at rank three. The [model forms](forms.md#relu-network) page lists the results
+of the comparisons on these cases.
 
 - [`test_a_difference_of_max_affine_approximates_the_system_better_than_an_affine_fit`](https://github.com/nardi/surreax/blob/main/tests/integration/test_piecewise_linear_systems.py#L21)
 - [`test_a_max_affine_fit_is_never_worse_than_an_affine_fit`](https://github.com/nardi/surreax/blob/main/tests/integration/test_piecewise_linear_systems.py#L60)
@@ -727,8 +730,8 @@ comparisons that they produce.
 
 ### Optimization over exported surrogates
 
-The library exports arrays and leaves the encoding of a solver program to the
-user. The functions in
+`export` returns arrays, and the user writes the encoding of the solver program.
+The functions in
 [`minimize_convex`](https://github.com/nardi/surreax/blob/main/tests/optimization_encodings.py#L30)
 and
 [`minimize_relu`](https://github.com/nardi/surreax/blob/main/tests/optimization_encodings.py#L104)
@@ -744,10 +747,11 @@ $$
 a_j^\top x + b_j \le u \quad \text{for every piece } j,
 $$
 
-and a convex network replaces each ReLU by a variable that is at least its
-pre-activation. For a ReLU network the program is mixed-integer. A hidden unit
-$a = \max(p, 0)$ with pre-activation $p$ gets a binary $s$ and bounds
-$l \le p \le u$ from interval arithmetic, and the constraints are
+and in the encoding of a convex network, each ReLU is replaced by a variable
+that is at least its pre-activation. For a ReLU network the program is
+mixed-integer. A hidden unit $a = \max(p, 0)$ with pre-activation $p$ has a
+binary variable $s$ and bounds $l \le p \le u$ from interval arithmetic, and the
+constraints are
 
 $$
 a \ge p, \qquad a \ge 0, \qquad a \le p - l\,(1 - s), \qquad a \le u\, s.

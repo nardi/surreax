@@ -1,16 +1,16 @@
 # The basic workflow
 
-This page walks through a full fit and the object it returns. A fit needs three
+This page shows a full fit and the object that `fit` returns. A fit needs three
 things. The target is the function to approximate, the domain is the region
-where the approximation should be accurate, and the form is the shape the
-approximation may take, such as a polynomial. The [terminology](terminology.md)
-page defines these terms and the others that the documentation uses. The
-recommended import is `import surreax as sx`.
+where the approximation should be accurate, and the form is the kind of function
+the approximation may be, such as a polynomial. The
+[terminology](terminology.md) page defines these terms and the others that the
+documentation uses. The recommended import is `import surreax as sx`.
 
 ## The target
 
 A target is a pure JAX function from one input to a pytree of outputs. `surreax`
-vectorizes it for you, so you write it for a single example. This one is the
+vectorizes it for you, so you write it for a single input. This one is the
 horizontal range of a projectile as a function of its launch speed and angle.
 
 <!-- name: test_start_target -->
@@ -26,10 +26,10 @@ def projectile_range(state):
 
 ## The domain
 
-The domain says where the surrogate should be accurate. Without it the request
-is not well posed, because reproducing a function has no meaning without a
-region. A `Box` is the simplest domain, a lower and an upper bound per
-coordinate.
+The domain is the region where the surrogate should be accurate. Without it the
+request is not well posed, because approximating a function has no meaning
+without a region. A `Box` is the simplest domain, with a lower and an upper
+bound per coordinate.
 
 <!-- name: test_start_target -->
 ```python
@@ -38,11 +38,11 @@ domain = sx.box([5.0, 0.2], [20.0, 1.3])
 
 If you already have a dataset of inputs, `sx.box_from_data(points)` infers the
 tightest box that contains them. A box around clustered or correlated data also
-contains empty regions the data never reached, so `sx.domain_from_data(points)`
-keeps a model of where the data lies as well. A surrogate fitted over it has
-`surrogate.coverage(x)`, which is at most one near the data and grows away from
-it. Use it to flag a prediction that is an extrapolation. The report's
-`coverage_max` gives the largest coverage over the held-out points.
+contains regions without any data, so `sx.domain_from_data(points)` also stores
+the principal directions and the spread of the data. A surrogate fitted over it
+has `surrogate.coverage(x)`, which is at most one near the data and increases
+with the distance from it. Use it to flag a prediction that is an extrapolation.
+The report's `coverage_max` is the largest coverage over the held-out points.
 
 <!-- name: test_start_coverage -->
 ```python
@@ -66,20 +66,21 @@ The example fits the data directly with `fit_data`, which the section on
 ### Other input kinds
 
 Not every input is a plain range. `sx.product` takes a pytree of leaf domains
-that mirrors the target's input, and each leaf samples its own way.
+that has the same structure as the target's input, and each leaf domain is
+sampled in its own way.
 
 - `sx.log_range(lower, upper)` samples uniformly in the logarithm, for an input
-  that spans orders of magnitude. The model works on the logarithm too.
+  that spans orders of magnitude. The model input is the logarithm too.
 - `sx.normal(mean, std)` samples a normal distribution, cut at four standard
-  deviations so the domain stays bounded.
+  deviations so the domain is bounded.
 - `sx.integer(lower, upper)` samples integers, both bounds included.
-- `sx.categorical(choices)` picks one of a set of options, stacked along the
-  first axis. The model sees one weight per option, which is one-hot at every
-  sample.
+- `sx.categorical(choices)` samples one of a set of options, which are stacked
+  along the first axis of `choices`. The model input has one weight per option,
+  and these weights are one-hot at every sample.
 
 Integer and categorical inputs are discrete. Derivative supervision and the
-derivative error leave them out, an input reduction passes them through
-unchanged, and the worst-case search only reports points with valid values.
+derivative error exclude them, an input reduction does not change them, and the
+worst-case search only reports points where they have valid values.
 
 <!-- name: test_start_mixed_domain -->
 ```python
@@ -113,8 +114,7 @@ assert jnp.allclose(surrogate(point), load(point), rtol=1e-3)
 ## The fit
 
 `fit` samples the domain with a low-discrepancy sequence, evaluates the target,
-and solves for the chosen form. A degree-five polynomial handles this target
-well.
+and solves for the chosen form. A degree-five polynomial fits this target well.
 
 <!-- name: test_start_target -->
 ```python
@@ -133,14 +133,14 @@ itself uses the rest. The `seed` argument makes the samples and any random
 restarts reproducible.
 
 The [model forms](forms.md) page describes the choices for the third argument.
-If you leave it out, `fit` reads the target and picks a form, as described in
+If you leave it out, `fit` analyzes the target and picks a form, as described in
 [automatic strategy selection](techniques.md#automatic-strategy-selection). The
 [fitting techniques](techniques.md) page describes the other options of `fit`.
 
 ## The report
 
-The fitted object carries an error report, measured on held-out samples that did
-not take part in the fit. Value error and derivative error are reported apart.
+The fitted object has an error report, measured on held-out samples that are not
+used in the fit. Value error and derivative error are reported separately.
 
 <!-- name: test_start_target -->
 ```python
@@ -156,19 +156,20 @@ report are these.
 | Field | Meaning |
 | --- | --- |
 | `value_mean`, `value_max` | Mean and largest difference between the output of the surrogate and the output of the target. |
-| `derivative_mean`, `derivative_max` | The same for the Jacobian, which a downstream optimizer consumes. |
-| `projection_mean`, `projection_max` | Error that an output reduction gives up before any fitting, from reconstructing the held-out outputs. |
+| `derivative_mean`, `derivative_max` | The same for the Jacobian, which a downstream optimizer uses. |
+| `projection_mean`, `projection_max` | Error that an output reduction introduces before any fitting, measured by reconstructing the held-out outputs. |
 | `worst_case`, `worst_case_point` | Largest value error that the [worst-case search](techniques.md#worst-case-error) found over the whole domain, and the flat input where it occurs. |
 | `structure_cost` | Number of parts in the model, such as basis terms or affine pieces. |
 | `coverage_max` | Largest [coverage](#the-domain) over the held-out points. |
 
 A surrogate that matches values well can still match derivatives badly, which is
-why the two errors are kept apart. The worst case is zero when you pass
+why the two errors are reported separately. The worst case is zero when you pass
 `worst_case_starts=0`.
 
 ## The surrogate as a function
 
-The surrogate has the target's signature and evaluates in one step.
+The surrogate has the target's signature, so it is called with the same
+arguments.
 
 <!-- name: test_start_target -->
 ```python
@@ -178,18 +179,19 @@ assert abs(float(approx[0]) - float(true[0])) < 1.0
 ```
 
 It is also a pytree of arrays, so it can be differentiated, vectorized with
-`jax.vmap`, and compiled with `jax.jit`. A form that holds a Python function,
-such as the activation of `NetworkForm`, needs `equinox.filter_jit` in place of
-`jax.jit`.
+`jax.vmap`, and compiled with `jax.jit`. A form that has a Python function as a
+field, such as the activation of `NetworkForm`, needs `equinox.filter_jit` in
+place of `jax.jit`.
 
 ## Input-output pairs
 
-When you already hold input-output pairs and have no callable, `fit_data` fits a
+When you already have input-output pairs and have no callable, `fit_data` fits a
 linear form to them directly. Linear forms are `Affine`, `ChebyshevPolynomial`,
-and `Grid`. It normalizes from the sample moments, since the pairs carry no
-domain box, and reports the held-out prediction error. Its domain comes from the
-data through `domain_from_data`, so the surrogate's `coverage` tells a query
-near the data from one in an empty part of the box.
+and `Grid`. It normalizes the inputs and outputs by their sample mean and
+standard deviation, because the pairs have no domain box, and reports the
+held-out prediction error. Its domain is computed from the data with
+`domain_from_data`, so the surrogate's `coverage` distinguishes a query near the
+data from one in an empty part of the box.
 
 <!-- name: test_start_fit_data -->
 ```python
@@ -207,6 +209,6 @@ assert float(surrogate.report.value_max) < 1e-3
 ```
 
 The report from `fit_data` has no derivative, projection, or worst-case error,
-because there is no target to compare against. The [implicit
-targets](implicit.md) page uses `fit_data` internally, and it is useful on its
-own for a distilled dataset.
+because there is no target to compare against. The methods on the
+[implicit targets](implicit.md) page call `fit_data` internally, and `fit_data`
+is also useful on its own for a distilled dataset.

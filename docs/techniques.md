@@ -13,15 +13,15 @@ against the Jacobian as well as the values is Sobolev training, defined in the
 [terminology](terminology.md#derivative-supervision), from Czarnecki and
 colleagues, [Sobolev Training for Neural
 Networks](https://arxiv.org/abs/1706.04859), NeurIPS 2017. It matters when the
-surrogate goes into an optimizer, since the optimizer will consume its
-derivatives.
+surrogate is used in an optimizer, because the optimizer uses its derivatives.
 
 For a form that is linear in its parameters, the Jacobian is also linear in the
-weights, so the derivative equations join the value equations in one least
-squares solve and the fit stays closed form. A positive `derivative_weight`
-turns it on. The network forms add a Jacobian term to their loss in the same
-way. The max-affine and difference of max-affine forms ignore the weight, and so
-does a sparse fit, since `sparse_terms` takes the fit over.
+weights, so the derivative equations are added to the value equations in one
+least squares solve, and the fit is still in closed form. A positive
+`derivative_weight` enables it. The network forms add a Jacobian term to their
+loss in the same way. The max-affine and difference of max-affine forms ignore
+the weight, and so does a sparse fit, because with `sparse_terms` the terms are
+selected by matching pursuit instead.
 
 <!-- name: test_techniques_derivative -->
 ```python
@@ -42,8 +42,8 @@ assert float(with_derivatives.report.derivative_max) < float(value_only.report.d
 
 ## Dimension reduction
 
-`fit` can fit the model in a smaller space. On the output side this is the
-larger win, because a long correlated output vector is captured by a few
+`fit` can fit the model in a smaller space. The reduction of the outputs has the
+larger effect, because a long correlated output vector can be described by a few
 coefficients. `pca_outputs` keeps the leading principal directions of the
 outputs.
 
@@ -54,7 +54,7 @@ import surreax as sx
 
 
 def spectrum(x):
-    # A six-vector output that lives in a two-dimensional subspace.
+    # A six-vector output that is in a two-dimensional subspace.
     return jnp.array([x[0], x[1], x[0] + x[1], x[0] - x[1], 2 * x[0], 2 * x[1]])
 
 
@@ -69,7 +69,7 @@ surrogate = sx.fit(
 assert float(surrogate.report.value_max) < 1e-3
 ```
 
-The report's projection error is the accuracy that the output reduction gives up
+The report's projection error is the error that the output reduction introduces
 before any fitting, measured by reconstructing the held-out outputs.
 
 On the input side, `pca_inputs` finds the directions in which the data varies,
@@ -77,23 +77,23 @@ while `active_subspace_inputs` finds the directions in which the function
 varies, from the average outer product of the target gradient. The active
 subspace is from Constantine and Gleich, [Computing active subspaces with Monte
 Carlo](https://arxiv.org/abs/1408.0545). An input reduction has no separate
-error in the report, since it shows up in the value error. Each reducer takes a
-`rank`, or keeps the fewest directions that reach a `variance` fraction, 0.99 by
-default.
+error in the report, because its error is included in the value error. Each
+reducer takes a `rank`, or keeps the fewest directions that reach a `variance`
+fraction, 0.99 by default.
 
 ## Sparse basis selection
 
 A total-degree polynomial basis grows as the number of inputs and the degree
 rise, and most of its coefficients should be zero. A sparse fit keeps only the
-terms that matter, which limits that growth and lowers the structure cost. This
-is the route ALAMO takes, from Cozad, Sahinidis, and Miller, [Learning surrogate
+terms that matter, which limits that growth and lowers the structure cost. ALAMO
+uses the same approach, from Cozad, Sahinidis, and Miller, [Learning surrogate
 models for simulation-based optimization](https://doi.org/10.1002/aic.14418),
 AIChE Journal 60, 2014.
 
 `surreax` selects the terms by orthogonal matching pursuit, which adds the term
-most correlated with the residual, refits, and repeats to a budget. A
-`sparse_terms` budget turns it on, and the structure cost reports how many terms
-the fit kept.
+most correlated with the residual, refits, and repeats until the number of terms
+reaches the budget. A `sparse_terms` budget enables it, and the structure cost
+is the number of selected terms.
 
 <!-- name: test_techniques_sparse -->
 ```python
@@ -115,14 +115,15 @@ assert surrogate.report.structure_cost <= 3
 ## Worst-case error
 
 The value and derivative errors in the report are measured on a held-out sample,
-so they can miss a region where the fit is worst. Because the surrogate and the
-target are both differentiable, `fit` also climbs the error over the whole
-domain from several starts and reports the largest it finds, along with the
-point where it occurs. The search starts from the held-out points with the
-largest error and fills the remaining starts at random. This is a tighter check
-than a sample statistic, and `worst_case_starts=0` skips it when speed matters.
-The `worst_case_steps` and `worst_case_rate` arguments set the length and the
-step size of each climb, and the defaults are 8 starts, 200 steps and 0.05.
+so they can miss a region where the error is largest. Because the surrogate and
+the target are both differentiable, `fit` also runs gradient ascent on the error
+over the whole domain from several starts and reports the largest error it
+finds, along with the point where it occurs. The search starts from the held-out
+points with the largest error and draws the remaining starts at random. This is
+a stricter check than a statistic of the sample, and `worst_case_starts=0`
+disables it when speed matters. The `worst_case_steps` and `worst_case_rate`
+arguments set the length and the step size of each ascent, and the defaults are
+8 starts, 200 steps and 0.05.
 
 <!-- name: test_techniques_worst_case -->
 ```python
@@ -137,26 +138,26 @@ def target(x):
 domain = sx.box([-1.0, -1.0], [1.0, 1.0])
 surrogate = sx.fit(target, domain, sx.ChebyshevPolynomial(degree=2), samples=128)
 report = surrogate.report
-# The domain search cannot do better than the held-out sample it contains.
+# The domain search starts from the held-out points, so it finds at least their maximum.
 assert float(report.worst_case) >= float(report.value_max) - 1e-5
 ```
 
 ## Adaptive sampling
 
-Because the target is callable, the sample is not a fixed resource, so the fit
-can add points where it is worst instead of committing to one grid.
-`fit_adaptive` fits on an initial sample, locates the highest-error points with
-the domain search, adds them, and refits, stopping when the worst-case error
-meets a tolerance or after a round budget. This is the residual-based adaptive
+Because the target is callable, the sample does not have to be fixed in advance,
+and the fit can add points where its error is largest. `fit_adaptive` fits on an
+initial sample, finds the points with the largest error with the domain search,
+adds them, and refits. It stops when the worst-case error is below a tolerance
+or after a maximum number of rounds. This is the residual-based adaptive
 refinement of the surrogate-modeling literature, such as DeepXDE, from Lu and
 colleagues, [DeepXDE](https://arxiv.org/abs/1907.04502), SIAM Review 63(1),
 2021.
 
-The `tolerance` is 1e-3 by default and `rounds` is 5. The stop test reads the
-worst-case error, so keep `worst_case_starts` above zero, since a value of zero
-reports a worst case of zero and stops the loop at once. Each refit starts from
-the previous surrogate for the forms that accept a start, which are the
-max-affine and network forms.
+The `tolerance` is 1e-3 by default and `rounds` is 5. The stopping test uses the
+worst-case error, so keep `worst_case_starts` above zero. With zero starts the
+reported worst case is zero, and the loop stops after the first fit. Each refit
+starts from the previous surrogate for the forms that accept an initial
+surrogate, which are the max-affine and network forms.
 
 <!-- name: test_techniques_adaptive -->
 ```python
@@ -179,10 +180,10 @@ assert float(adaptive.report.worst_case) < float(fixed.report.worst_case)
 
 ## Structural pruning
 
-The Jacobian says which inputs each output depends on. An input that no output
-depends on can be dropped, which is exact rather than statistical.
-`prune_inputs` is an input reducer that does this, and it fits into
-`reduce_inputs` like the PCA and active-subspace reducers.
+The nonzero entries of the Jacobian show which inputs each output depends on. An
+input that no output depends on can be dropped, which is exact rather than
+statistical. `prune_inputs` is an input reducer that drops such inputs, and it
+is passed as `reduce_inputs` like the PCA and active-subspace reducers.
 
 <!-- name: test_techniques_pruning -->
 ```python
@@ -208,10 +209,10 @@ assert surrogate.input_reduction.encode_matrix.shape == (2, 5)
 assert float(surrogate.report.value_max) < 1e-3
 ```
 
-`analyze` returns the same reading as a report. It holds the [coupling
-matrix](terminology.md#coupling-and-separable-blocks) and the block labels that
-split outputs and inputs into independent groups, so a separable target reads as
-separate blocks.
+`analyze` returns the same Jacobian analysis as a `Structure`. It contains the
+[coupling matrix](terminology.md#coupling-and-separable-blocks) and the block
+labels that assign outputs and inputs to independent groups, so a separable
+target has several blocks.
 
 <!-- name: test_techniques_analyze -->
 ```python
@@ -230,19 +231,20 @@ assert structure.input_block[0] != structure.input_block[2]
 ## Separable fitting
 
 When a target splits into independent blocks, `fit_separable` fits each block on
-its own inputs and assembles the pieces, which is faster and more accurate than
-one fit over everything. It reads the blocks from the structural analysis. Pass
-one form for every block, or a sequence of forms in sorted-block order, so a
-linear block can take a closed-form fit and a nonlinear one a richer form.
+its own inputs and combines the block surrogates, which is faster and more
+accurate than one fit over everything. It takes the blocks from the structural
+analysis. Pass one form for every block, or a sequence of forms in sorted-block
+order, so a linear block can be fitted in closed form and a nonlinear one with a
+richer form.
 
-Each block searches its own inputs for its worst-case error. The blocks read
-separate inputs, so their worst cases can all happen at once, and the report's
-worst case is the root sum of squares of the block worst cases, at the input
-that joins the block points.
+The worst-case search runs per block, over the inputs of that block. The blocks
+depend on separate inputs, so their worst cases can all occur at the same input.
+The report's worst case is the root sum of squares of the block worst cases, at
+the input that combines the block points.
 
 The domain must be a `Box`. The report's value errors are the largest over the
-blocks. Its projection errors hold a first-order bound on the error from the
-coupling that the separation drops, and its derivative errors are zero, since
+blocks. Its projection errors contain a first-order bound on the error from the
+coupling that the separation neglects, and its derivative errors are zero, since
 `fit_separable` does not measure them.
 
 <!-- name: test_techniques_separable -->
@@ -261,7 +263,7 @@ surrogate = sx.fit_separable(target, domain, [sx.Affine(), sx.ChebyshevPolynomia
 
 point = jnp.array([0.4, 0.5])
 assert jnp.allclose(surrogate(point), target(point), atol=1e-2)
-# The report bounds the error from any coupling dropped between blocks.
+# The projection error bounds the error from any coupling neglected between blocks.
 assert float(surrogate.report.projection_max) < 1e-5
 # The per-block search finds a larger error than the held-out sample.
 assert surrogate.report.value_max <= surrogate.report.worst_case < 5e-2
@@ -269,17 +271,18 @@ assert surrogate.report.value_max <= surrogate.report.worst_case < 5e-2
 
 ## Equality constraints
 
-A surrogate breaks a known equation, such as a mass balance, by its fit error.
-`fit_constrained` makes it hold exactly instead. A `Constraint` names an
-equation `h(x, y) = 0` and the flat outputs it determines, as many as it has
-equations. The surrogate predicts the other outputs, and the dependent ones are
-solved from the equation at call time, by Newton from the fit's own prediction
-of them. This is the completion of [DC3](https://arxiv.org/abs/2104.12225) by
-Donti, Rolnick and Kolter. An equation that is affine in the dependent outputs
-completes in one step, and any other equation takes eight unless the
-`Constraint` sets `steps`. The derivative comes from the implicit function
-theorem, so the completed surrogate differentiates exactly. A choice of
-dependent outputs the equation does not determine is rejected at fit time.
+A surrogate violates a known equation, such as a mass balance, by up to its fit
+error. With `fit_constrained` the equation holds exactly instead. A `Constraint`
+consists of an equation `h(x, y) = 0` and the indices of the flat outputs that
+it determines, as many as it has equations. The surrogate predicts the other
+outputs, and the dependent ones are solved from the equation at call time, by
+Newton from the fit's own prediction of them. This is the completion of
+[DC3](https://arxiv.org/abs/2104.12225) by Donti, Rolnick and Kolter. For an
+equation that is affine in the dependent outputs the completion takes one Newton
+step, and for any other equation it takes eight unless the `Constraint` sets
+`steps`. The derivative is computed with the implicit function theorem, so the
+derivative of the completed surrogate is exact. A choice of dependent outputs
+the equation does not determine is rejected at fit time.
 
 <!-- name: test_techniques_constraint -->
 ```python
@@ -313,23 +316,23 @@ residual's equations holds exactly.
 ## Automatic strategy selection
 
 The structural analysis can also choose the form for you. If you leave the form
-out of `fit`, it reads the function kind of each output and picks a form to
-match. The reading is numerical. It samples the Jacobian and the curvature of
-the target, so it works on any JAX function. An affine output has a constant
-Jacobian, a piecewise linear output has a varying Jacobian and no curvature, a
-polynomial output has real curvature, and a discontinuous output has a jump in
-value that the Jacobian does not show. The form follows from the kinds of all
-the outputs.
+out of `fit`, it determines the function kind of each output and picks a
+matching form. The classification is numerical, from samples of the Jacobian and
+the curvature of the target, so it works on any JAX function. An affine output
+has a constant Jacobian, a piecewise linear output has a varying Jacobian and no
+curvature, a polynomial output has real curvature, and a discontinuous output
+has a jump in value that the Jacobian does not show. The form is chosen from the
+kinds of all the outputs, as in this table.
 
 | Kinds present | Form |
 | --- | --- |
 | Only affine | `Affine` |
-| Polynomial, with no piecewise linear | `ChebyshevPolynomial`, of the degree read from the target, at least 2 |
+| Polynomial, with no piecewise linear | `ChebyshevPolynomial`, of the degree determined from the target, at least 2 |
 | Piecewise linear, with no polynomial | `MaxAffineForm` with four pieces |
 | Polynomial and piecewise linear | `NetworkForm` of width 32 and depth 2 |
 | Any discontinuous output | The same `NetworkForm`, with a warning |
 
-The choice is advisory, so a form you pass always wins.
+A form that you pass always takes precedence over the chosen one.
 
 <!-- name: test_techniques_auto_form -->
 ```python
@@ -347,14 +350,14 @@ surrogate = sx.fit(target, domain, samples=256)
 assert float(surrogate.report.value_max) < 1e-3
 ```
 
-For a polynomial form the choice goes further, through `recommend_fit`. The
-degree comes from the target's jaxpr, the program that JAX records when it
-traces the function, which `polynomial_degrees` walks while it propagates a
-degree per value, so a cubic reads as degree three and anything with `sin` or a
-division by an input reads as not a polynomial. When a curved output is not a
-polynomial, the degree is the lowest at which raising it no longer halves the
-held-out error, up to degree 6. The other settings come from three readings of
-the samples.
+For a polynomial form, `recommend_fit` also chooses the degree and other
+settings. The degree comes from the target's jaxpr, the program that JAX records
+when it traces the function, and `polynomial_degrees` traverses that jaxpr and
+propagates a degree per value. A cubic is assigned degree three, and anything
+with `sin` or a division by an input is classified as not a polynomial. When a
+curved output is not a polynomial, the degree is the lowest at which raising it
+no longer halves the held-out error, up to degree 6. The other settings come
+from three tests on the samples.
 
 - An active-subspace reduction is added when the target has at least three
   continuous inputs and varies along fewer directions than that. The directions
@@ -365,8 +368,8 @@ the samples.
   training samples. It is the best of three budgets by held-out error.
 
 `recommend_fit` returns these as a `FitSettings`, and an explicit
-`reduce_inputs`, `reduce_outputs` or `sparse_terms` passed to `fit` wins over
-the recommended one.
+`reduce_inputs`, `reduce_outputs` or `sparse_terms` passed to `fit` takes
+precedence over the recommended one.
 
 <!-- name: test_techniques_recommend_fit -->
 ```python
@@ -388,8 +391,8 @@ assert settings.form == sx.ChebyshevPolynomial(degree=3)
 so a target that is linear in one block and nonlinear in another gets a linear
 form on the first and a richer form on the second. `fit_implicit` chooses a
 method from the residual when you pass an `unknown_domain` and no method. It
-takes an `InverseMap` for an unknown of at most 32 entries and an `ExactSolve`,
-which reduces the output, for a larger one. The [implicit targets](implicit.md)
-page describes both methods. You can inspect the reading directly with
-`function_kinds`, `recommend_form`, `recommend_block_forms`, `recommend_method`,
-and `recommend_implicit_form`.
+chooses an `InverseMap` for an unknown of at most 32 entries and an
+`ExactSolve`, which reduces the output, for a larger one. The [implicit
+targets](implicit.md) page describes both methods. The individual decisions are
+also available from `function_kinds`, `recommend_form`, `recommend_block_forms`,
+`recommend_method`, and `recommend_implicit_form`.
